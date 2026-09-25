@@ -44,6 +44,9 @@ def init():
               PRIMARY KEY(job_id, idx));
             """
         )
+        cols = [r[1] for r in c.execute("PRAGMA table_info(jobs)")]
+        if "saved" not in cols:
+            c.execute("ALTER TABLE jobs ADD COLUMN saved TEXT")
 
 
 def job_dir(job_id):

@@ -13,6 +13,7 @@ services:
       - /DATA/AppData/dedplay-studyo/data:/data
       - /media/ZimaOS-HD/Kitap:/kaynak:ro
       - /DATA/AppData/dedplay-kitap-okuma/seslendirme/text:/okuma-text:ro
+      - /media/ZimaOS-HD/Media/Music/audio:/cikti
     environment:
       - TRANSLATE_URL=http://host.docker.internal:8060
       - OKUMA_URL=http://host.docker.internal:8020

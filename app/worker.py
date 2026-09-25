@@ -21,6 +21,7 @@ from . import clients, db
 from .detect import detect_lang, sample_text
 
 TEXT_DIR = os.environ.get("OKUMA_TEXT_DIR", "/okuma-text")
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/cikti")
 TICK = 4
 OSM_BUDGET = 20  # saniye: her turda Osmanlıcaya ayrılan en fazla süre
 
@@ -104,6 +105,10 @@ class Worker(threading.Thread):
                     except Exception:
                         pass
                 db.update(jid, stage="done", status="done", finished=time.time())
+                try:
+                    save_outputs(jid)
+                except Exception as e:
+                    db.update(jid, note=f"Dosyalar çıktı klasörüne kaydedilemedi: {str(e)[:200]}")
 
     # ------------------------------------------------------------
     def step_okuma(self, j, src):
@@ -165,6 +170,31 @@ class Worker(threading.Thread):
                 if time.time() > end:
                     return
             db.update(jid, osm_state="bitti")
+
+
+def save_outputs(job_id):
+    """Biten kitabın bütün dosyalarını çıktı klasörüne, sesli kitabın yanına kaydeder."""
+    if not os.path.isdir(OUTPUT_DIR):
+        raise RuntimeError("Çıktı klasörü bağlı değil (docker-compose'da /cikti).")
+    from .export import build
+    j = db.get(job_id)
+    parts = db.all_parts(job_id)
+    if not parts:
+        raise RuntimeError("Metin parçaları yok.")
+    name = (j["book_name"] or j["title"]).replace("/", "-")
+    folder = os.path.join(OUTPUT_DIR, name)
+    os.makedirs(folder, exist_ok=True)
+    for variant in ("tr", "osm", "iki"):
+        for fmt in ("epub", "pdf", "docx"):
+            data, _, fname = build(j, parts, fmt, variant)
+            with open(os.path.join(folder, fname.replace("/", "-")), "wb") as f:
+                f.write(data)
+    if j["tr_job"]:
+        for fmt in ("epub", "pdf"):
+            clients.tr_download(j["tr_job"], fmt,
+                                os.path.join(folder, f"{j['title']} - Çeviri ve aslı.{fmt}".replace("/", "-")), 1)
+    db.update(job_id, saved=name, note=None)
+    return name
 
 
 def resume(job_id):

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from . import clients, db
 from .export import FORMATS, build
-from .worker import resume, worker
+from .worker import resume, save_outputs, worker
 
 app = FastAPI(title="Dedplay Studio")
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -119,6 +119,17 @@ def job_from_server(f: ServerFile):
 def resume_job(job_id: int):
     resume(job_id)
     return {"ok": True}
+
+
+@app.post("/api/jobs/{job_id}/save")
+def save_job(job_id: int):
+    j = db.get(job_id)
+    if not j or j["status"] != "done":
+        raise HTTPException(409, "Kitap henüz tamamlanmadı.")
+    try:
+        return {"saved": save_outputs(job_id)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 @app.delete("/api/jobs/{job_id}")

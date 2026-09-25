@@ -1,0 +1,177 @@
+# =============================================================================
+#  DEDPLAY STUDIO — HEPSİ BİR ARADA KURULUM
+#  Tek seferde 5 uygulama kurulur:
+#    Stüdyo (8070) · Translate (8060) · Kitap Okuma (8020) · Osmanlıca çevirici (8089) · Ollama
+#  Uygulamaların kendi verileri otomatik olarak /DATA/AppData/dedplay-studyo/ altına gider.
+#
+#  ZimaOS: Uygulama Mağazası → Özel Kurulum (Custom Install) → İçe aktar → bu dosyanın
+#  içeriğini yapıştır. Yapıştırmadan önce SADECE aşağıdaki iki klasörü kontrol et.
+# =============================================================================
+
+x-klasorler:
+  # ▼▼▼ DEĞİŞTİRİLEBİLİR 1: KİTAP KLASÖRÜ ▼▼▼
+  # Okunacak / çevrilecek kitaplarının durduğu klasör.
+  # Stüdyo, Translate ve Kitap Okuma'daki "Sunucudan seç" bölümünde bu klasör görünür.
+  # Uygulamalar bu klasöre hiçbir şey yazmaz, sadece okur.
+  kitap: &kitap /media/ZimaOS-HD/Kitap
+
+  # ▼▼▼ DEĞİŞTİRİLEBİLİR 2: ÇIKTI KLASÖRÜ ▼▼▼
+  # Biten her kitap için burada kitap adıyla bir klasör açılır ve içine
+  # sesli kitap (M4B) ile bütün Türkçe / Osmanlıca EPUB, PDF, Word dosyaları kaydedilir.
+  # Audiobookshelf kullanıyorsan onun "audiobooks" olarak okuduğu klasörü seç.
+  cikti: &cikti /media/ZimaOS-HD/Media/Music/audio
+
+# ▼ Bundan sonrasına dokunmana gerek yok ▼
+
+name: dedplay-studyo
+services:
+
+  # ---------------- Stüdyo: tek arayüz, diğerlerini yönetir ----------------
+  studyo:
+    image: berzahbey/dedplay-studyo:latest
+    container_name: dedplay-studyo
+    restart: unless-stopped
+    depends_on: [translate, kitap-okuma, osmanlica]
+    ports:
+      - "8070:8000"
+    environment:
+      TRANSLATE_URL: http://translate:8000
+      OKUMA_URL: http://kitap-okuma:8000
+      OSMANLICA_URL: http://osmanlica:8000
+      OSM_USE_OLLAMA: "false"      # Osmanlıcada bilinmeyen kelimeler için Ollama (yavaşlatır)
+    volumes:
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/studyo
+        target: /data
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/kitap-okuma/text
+        target: /okuma-text
+        read_only: true
+      - type: bind
+        source: *kitap
+        target: /kaynak
+        read_only: true
+      - type: bind
+        source: *cikti
+        target: /cikti
+    x-casaos:
+      volumes:
+        - container: /kaynak
+          description:
+            en_us: "Kitap klasörü: okunacak/çevrilecek kitapların bulunduğu klasör (sadece okunur)."
+        - container: /cikti
+          description:
+            en_us: "Çıktı klasörü: sesli kitaplar ve bütün Türkçe/Osmanlıca dosyalar buraya kaydedilir."
+        - container: /data
+          description:
+            en_us: "Stüdyo verileri. Değiştirme."
+        - container: /okuma-text
+          description:
+            en_us: "Kitap Okuma'nın metin parçaları. Değiştirme."
+
+  # ---------------- Translate: Arapça / İngilizce / Fransızca → Türkçe ----------------
+  translate:
+    image: berzahbey/dedplay-translate:latest
+    container_name: dedplay-translate
+    restart: unless-stopped
+    depends_on: [ollama]
+    ports:
+      - "8060:8000"
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: gemma3:12b        # ilk açılışta otomatik iner (~8 GB)
+      LLM_CTX: "4096"
+    volumes:
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/translate
+        target: /data
+      - type: bind
+        source: *kitap
+        target: /kaynak
+        read_only: true
+
+  # ---------------- Ollama: çeviri modelini çalıştırır ----------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dedplay-ollama
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes:
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/ollama
+        target: /root/.ollama
+
+  # ---------------- Kitap Okuma: sesli kitap (Piper) ----------------
+  kitap-okuma:
+    image: berzahbey/dedplay-kitap-okuma:latest
+    container_name: dedplay-kitap-okuma
+    restart: unless-stopped
+    ports:
+      - "8020:8000"
+    volumes:
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/kitap-okuma/book
+        target: /app/books
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/kitap-okuma/text
+        target: /app/text
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/kitap-okuma/voices
+        target: /root/.cache/piper
+      - type: bind
+        source: *kitap
+        target: /app/kaynak-kitaplar
+      - type: bind
+        source: *cikti
+        target: /app/audio
+
+  # ---------------- Osmanlıca çevirici ----------------
+  osmanlica:
+    image: berzahbey/osmanlica-cevirici:latest
+    container_name: osmanlica-cevirici
+    restart: unless-stopped
+    depends_on: [ollama]
+    ports:
+      - "8089:8000"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5:7b
+      OLLAMA_TIMEOUT: "300"
+    volumes:
+      # Sözlük (/app/data) bilerek bağlanmadı: güncel sözlük imajın içinden gelir.
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/osmanlica
+        target: /data
+
+  # ---------------- Osmanlıca çevirici için Ollama modelini bir kez indirir ----------------
+  # (İş bitince durur; ZimaOS'ta "durdu" görünmesi normaldir.)
+  model-indir:
+    image: ollama/ollama:latest
+    container_name: dedplay-model-indir
+    restart: "no"
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "sleep 10; ollama pull qwen2.5:7b"]
+
+x-casaos:
+  architectures: [amd64]
+  main: studyo
+  author: berzahbey
+  developer: berzahbey
+  category: Utilities
+  index: /
+  port_map: "8070"
+  scheme: http
+  icon: https://raw.githubusercontent.com/berzahbey/dedplay-studyo/main/icon.png
+  title:
+    en_us: Dedplay Studio
+  tagline:
+    en_us: Kitabı ver; çevrilsin, seslendirilsin, Osmanlıcaya aktarılsın
+  description:
+    en_us: >-
+      Dedplay Studio, Translate, Kitap Okuma ve Osmanlıca çeviriciyi tek arayüzde birleştirir.
+      Türkçe olmayan kitaplar önce yerel yapay zekâ ile Türkçeye çevrilir; ardından aynı anda
+      seslendirilir (M4B) ve Osmanlıcaya aktarılır. Bütün çıktılar seçtiğin klasöre kaydedilir.

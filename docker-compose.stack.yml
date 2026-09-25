@@ -1,7 +1,8 @@
 # =============================================================================
 #  DEDPLAY STUDIO — HEPSİ BİR ARADA KURULUM
 #  Tek seferde 5 uygulama kurulur:
-#    Stüdyo (8070) · Translate (8060) · Kitap Okuma (8020) · Osmanlıca çevirici (8089) · Ollama
+#    Stüdyo (8070) · Translate (8060) · Kitap Okuma (8020) · Osmanlıca çevirici (8089) · Ollama (11435)
+#  Uygulamalar birbirine sunucunun kendisi üzerinden (portlarla) ulaşır; ZimaOS'un ağ ayarından etkilenmez.
 #  Uygulamaların kendi verileri otomatik olarak /DATA/AppData/dedplay-studyo/ altına gider.
 #
 #  ZimaOS: Uygulama Mağazası → Özel Kurulum (Custom Install) → İçe aktar → bu dosyanın
@@ -30,14 +31,15 @@ services:
   studyo:
     image: berzahbey/dedplay-studyo:latest
     container_name: dedplay-studyo
+    extra_hosts: ["host.docker.internal:host-gateway"]
     restart: unless-stopped
     depends_on: [translate, kitap-okuma, osmanlica]
     ports:
       - "8070:8000"
     environment:
-      TRANSLATE_URL: http://translate:8000
-      OKUMA_URL: http://kitap-okuma:8000
-      OSMANLICA_URL: http://osmanlica:8000
+      TRANSLATE_URL: http://host.docker.internal:8060
+      OKUMA_URL: http://host.docker.internal:8020
+      OSMANLICA_URL: http://host.docker.internal:8089
       OSM_USE_OLLAMA: "false"      # Osmanlıcada bilinmeyen kelimeler için Ollama (yavaşlatır)
     volumes:
       - type: bind
@@ -77,12 +79,13 @@ services:
   translate:
     image: berzahbey/dedplay-translate:latest
     container_name: dedplay-translate
+    extra_hosts: ["host.docker.internal:host-gateway"]
     restart: unless-stopped
     depends_on: [ollama]
     ports:
       - "8060:8000"
     environment:
-      OLLAMA_URL: http://ollama:11434
+      OLLAMA_URL: http://host.docker.internal:11435
       LLM_MODEL: gemma3:12b        # ilk açılışta otomatik iner (~8 GB)
       LLM_CTX: "4096"
     volumes:
@@ -101,6 +104,8 @@ services:
     image: ollama/ollama:latest
     container_name: dedplay-ollama
     restart: unless-stopped
+    ports:
+      - "11435:11434"
     environment:
       OLLAMA_KEEP_ALIVE: 30m
       OLLAMA_NUM_PARALLEL: "1"
@@ -145,12 +150,13 @@ services:
   osmanlica:
     image: berzahbey/osmanlica-cevirici:latest
     container_name: osmanlica-cevirici
+    extra_hosts: ["host.docker.internal:host-gateway"]
     restart: unless-stopped
     depends_on: [ollama]
     ports:
       - "8089:8000"
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: http://host.docker.internal:11435
       OLLAMA_MODEL: qwen2.5:7b
       OLLAMA_TIMEOUT: "300"
     volumes:
@@ -166,10 +172,11 @@ services:
   model-indir:
     image: ollama/ollama:latest
     container_name: dedplay-model-indir
+    extra_hosts: ["host.docker.internal:host-gateway"]
     restart: "no"
     depends_on: [ollama]
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: http://host.docker.internal:11435
     entrypoint: ["/bin/sh", "-c", "sleep 10; ollama pull qwen2.5:7b"]
 
 x-casaos:

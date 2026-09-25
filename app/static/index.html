@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dedplay Studio</title>
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icon-32.png">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #f2f4f1; --surface: #ffffff; --ink: #1c2b2a; --muted: #5f6d6a;
+  --line: #d5dcd8; --tile: #1b6e5a; --tile-soft: #e1efe9; --lapis: #2c4a7c; --danger: #9c3b2e; --amber: #9a6b00;
+  --serif: "Literata", Georgia, "Times New Roman", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #121917; --surface: #1a2320; --ink: #e3eae7; --muted: #95a39f;
+          --line: #2e3b37; --tile: #58bfa0; --tile-soft: #1e3a31; --lapis: #8fb0e6; --danger: #e08a7c; --amber: #e0b44f; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); }
+main { max-width: 920px; margin: 0 auto; padding: 44px 24px 80px; }
+header { display: flex; gap: 18px; align-items: center; }
+header img { width: 64px; height: 64px; border-radius: 14px; border: 1px solid var(--line); }
+h1 { font: 600 2.4rem/1.1 var(--serif); margin: 0; letter-spacing: -0.01em; }
+h2 { font: 600 1.35rem/1.3 var(--serif); margin: 44px 0 12px; }
+.lead { color: var(--muted); margin: 4px 0 0; max-width: 62ch; }
+.services { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 18px; font-size: .88rem; color: var(--muted); }
+.services span { display: inline-flex; gap: 7px; align-items: center; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+.dot.ok { background: var(--tile); } .dot.bad { background: var(--danger); }
+
+.card { margin-top: 28px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 22px; display: grid; gap: 16px; }
+.card.over { border-color: var(--tile); background: var(--tile-soft); }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 8px 12px; }
+.tab.on { color: var(--ink); border-bottom-color: var(--tile); font-weight: 600; }
+label.f { font-size: .9rem; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+select, input[type=text] { font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+button { font: inherit; font-size: .9rem; cursor: pointer; border-radius: 6px; padding: 6px 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+button:disabled { opacity: .6; cursor: default; }
+button.primary { background: var(--tile); border-color: var(--tile); color: #fff; font-weight: 600; padding: 8px 16px; }
+@media (prefers-color-scheme: dark) { button.primary { color: #0f1a16; } }
+button.link { border: 0; background: none; color: var(--lapis); padding: 4px 6px; }
+button.danger { color: var(--danger); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--lapis); outline-offset: 2px; }
+.hint { font-size: .85rem; color: var(--muted); margin: 0; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; font-size: .9rem; }
+.crumbs button { border: 0; background: none; color: var(--lapis); padding: 2px 4px; }
+.crumbs span { color: var(--muted); }
+.srvlist { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.srvlist li { border-bottom: 1px solid var(--line); } .srvlist li:last-child { border-bottom: 0; }
+.srvlist button { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: 9px 12px; display: flex; gap: 10px; align-items: center; overflow-wrap: anywhere; }
+.srvlist button:hover, .srvlist button.sel { background: var(--tile-soft); }
+.srvlist button.sel { font-weight: 600; }
+.srvlist .ic { width: 1.2em; flex: none; text-align: center; }
+.srvlist .sz { margin-left: auto; color: var(--muted); font-size: .82rem; white-space: nowrap; }
+
+.jobs { list-style: none; margin: 0; padding: 0; display: grid; gap: 16px; }
+.job { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; }
+.job-head { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+.job-title { font: 600 1.15rem/1.3 var(--serif); margin: 0; overflow-wrap: anywhere; }
+.state { font-size: .88rem; color: var(--muted); white-space: nowrap; }
+.state.done { color: var(--tile); } .state.error { color: var(--danger); }
+.stages { display: grid; gap: 12px; margin: 16px 0 6px; }
+.stage { display: grid; grid-template-columns: 9.5rem 1fr; gap: 4px 14px; align-items: center; }
+.stage .name { font-size: .9rem; font-weight: 600; }
+.stage .txt { grid-column: 2; font-size: .84rem; color: var(--muted); }
+.stage.skip .name, .stage.skip .txt { color: var(--muted); font-weight: 400; }
+.stage.bad .txt { color: var(--danger); }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--tile); transition: width .6s ease; }
+.bar.wait > i { background: var(--muted); opacity: .35; }
+@media (max-width: 560px) { .stage { grid-template-columns: 1fr; } .stage .txt { grid-column: 1; } }
+.msg { font-size: .86rem; margin: 8px 0 0; } .msg.err { color: var(--danger); } .msg.note { color: var(--amber); }
+.dl { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 12px; display: grid; gap: 8px; }
+.dl-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dl-row b { font-size: .86rem; width: 12.5rem; flex: none; }
+@media (max-width: 560px) { .dl-row b { width: 100%; } }
+.dl-row a { font-size: .85rem; text-decoration: none; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+.dl-row a:hover { border-color: var(--tile); background: var(--tile-soft); }
+.actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
+.empty { color: var(--muted); padding: 20px 0; }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="/static/icon-192.png" alt="">
+    <div>
+      <h1>Dedplay Studio</h1>
+      <p class="lead">Kitabı bir kez ver: gerekirse Türkçeye çevrilir, sonra aynı anda seslendirilir ve Osmanlıcaya aktarılır.</p>
+    </div>
+  </header>
+  <div class="services" id="services"></div>
+
+  <form class="card" id="drop">
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab on" data-tab="pc" role="tab">Bilgisayardan yükle</button>
+      <button type="button" class="tab" data-tab="srv" role="tab">Sunucudan seç</button>
+    </div>
+    <div id="pcPane">
+      <p style="margin:0 0 10px"><strong>Kitap dosyasını buraya bırakın</strong> ya da seçin.</p>
+      <input type="file" id="file" multiple accept=".epub,.pdf,.docx,.txt">
+    </div>
+    <div id="srvPane" hidden style="display:grid;gap:10px">
+      <div class="row">
+        <nav class="crumbs" id="crumbs" aria-label="Klasör yolu"></nav>
+        <input type="text" id="srvfilter" placeholder="Bu klasörde ara" style="margin-left:auto">
+      </div>
+      <ul class="srvlist" id="srvlist"></ul>
+      <p class="hint" id="srvsel">Dosyalara tıklayarak seç; birden fazla seçebilirsin.</p>
+    </div>
+    <div class="row">
+      <label class="f">Kitap dili
+        <select id="lang">
+          <option value="auto">Otomatik algıla</option>
+          <option value="tr">Türkçe (çeviri yapılmaz)</option>
+          <option value="ar">Arapça</option>
+          <option value="en">İngilizce</option>
+          <option value="fr">Fransızca</option>
+        </select>
+      </label>
+      <button class="primary" type="submit" id="send">Stüdyoya ekle</button>
+    </div>
+    <p class="hint">EPUB, PDF, DOCX ve TXT. Türkçe olmayan kitaplar önce çevrilir; çeviri bitince seslendirme ve Osmanlıca aynı anda başlar.</p>
+  </form>
+
+  <h2>Kitaplar</h2>
+  <ul class="jobs" id="jobs"></ul>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pct = (a, b) => b ? Math.min(100, Math.round(a * 100 / b)) : 0;
+const FORMATS = [["epub","EPUB"],["pdf","PDF"],["docx","Word"],["html","HTML"],["txt","TXT"]];
+const LANG = { tr: "Türkçe", ar: "Arapça", en: "İngilizce", fr: "Fransızca", auto: "algılanıyor" };
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+}
+
+async function loadServices() {
+  try {
+    const s = await api("/api/services");
+    const names = { translate: "Translate", okuma: "Kitap Okuma", osmanlica: "Osmanlıca çevirici" };
+    $("services").innerHTML = Object.entries(names).map(([k, n]) =>
+      `<span><i class="dot ${s[k] ? "ok" : "bad"}"></i>${n}${s[k] ? "" : " (ulaşılamıyor)"}</span>`).join("");
+  } catch { $("services").textContent = "Stüdyo sunucusuna ulaşılamıyor"; }
+}
+
+function stage(name, state, done, total, texts, skip) {
+  const t = texts[state] ?? state;
+  const running = ["calisiyor"].includes(state);
+  const p = state === "bitti" ? 100 : pct(done, total);
+  const cls = skip ? "skip" : (state === "hata" ? "bad" : "");
+  const txt = typeof t === "function" ? t(done, total) : t;
+  return `<div class="stage ${cls}"><span class="name">${name}</span>
+    <div class="bar ${running || state === "bitti" ? "" : "wait"}"><i style="width:${skip ? 0 : p}%"></i></div>
+    <span class="txt">${esc(txt)}</span></div>`;
+}
+
+function links(id, variant, label, partial) {
+  return `<div class="dl-row"><b>${label}${partial ? " (kısmi)" : ""}</b>` + FORMATS.map(([f, n]) =>
+    `<a href="/api/jobs/${id}/download?fmt=${f}&variant=${variant}">${n}</a>`).join("") + `</div>`;
+}
+
+function jobHTML(j) {
+  const translating = j.stage === "translate";
+  const tr = j.lang === "tr" ? stage("Çeviri", "atlandi", 0, 0, { atlandi: "Kitap Türkçe, çeviri gerekmedi" }, true)
+    : stage("Çeviri", j.tr_state, j.tr_done, j.tr_total, {
+        bekliyor: "Dil belirleniyor", sirada: "Translate'te sırada",
+        calisiyor: (d, t) => t ? `${d} / ${t} paragraf, %${pct(d, t)}` : "Metin çıkarılıyor",
+        duraklatildi: "Translate'te duraklatıldı", hata: "Çeviri durdu", bitti: `Tamamlandı (${j.tr_total} paragraf)` });
+  const ok = stage("Seslendirme", j.ok_state, j.ok_done, j.ok_total, {
+    bekliyor: translating ? "Çeviri bitince başlayacak" : "Başlıyor", sirada: "Kitap Okuma'da sırada",
+    calisiyor: (d, t) => t ? `Bölüm ${d} / ${t}, %${pct(d, t)}` : "Hazırlanıyor",
+    hata: "Seslendirme hata verdi", bitti: "Sesli kitap hazır" });
+  const osm = stage("Osmanlıca", j.osm_state, j.osm_done, j.osm_total, {
+    bekliyor: translating ? "Çeviri bitince başlayacak" : "Temiz metin parçaları bekleniyor",
+    calisiyor: (d, t) => `${d} / ${t} parça, %${pct(d, t)}`, hata: "Osmanlıca çeviri durdu", bitti: "Osmanlıca metin hazır" });
+
+  const stateTxt = j.status === "done" ? "Tamamlandı" : j.status === "error" ? "Durdu" : "Çalışıyor";
+  let dl = "";
+  if (j.audio) {
+    const a = j.audio, n = a.m4b ? 1 : (a.parts || []).length;
+    dl += `<div class="dl-row"><b>Sesli kitap</b>` + Array.from({ length: n }, (_, i) =>
+      `<a href="/api/jobs/${j.id}/audio?part=${i}">M4B${n > 1 ? " " + (i + 1) : ""}</a>`).join("") + `</div>`;
+  }
+  const partsReady = ["calisiyor", "bitti"].includes(j.osm_state);
+  if (partsReady) dl += links(j.id, "tr", "Türkçe metin", false);
+  if (j.osm_done > 0) {
+    const partial = j.osm_state !== "bitti";
+    dl += links(j.id, "osm", "Osmanlıca", partial) + links(j.id, "iki", "Türkçe + Osmanlıca", partial);
+  }
+  if (j.tr_job && j.tr_state === "bitti")
+    dl += `<div class="dl-row"><b>Çeviri, aslıyla birlikte</b>` + [["epub","EPUB"],["pdf","PDF"],["docx","Word"]].map(([f, n]) =>
+      `<a href="/api/jobs/${j.id}/translation?fmt=${f}&bilingual=1">${n}</a>`).join("") + `</div>`;
+
+  const canResume = j.status === "error" || [j.tr_state, j.ok_state, j.osm_state].some(s => s === "hata" || s === "duraklatildi");
+  return `<li class="job" data-id="${j.id}">
+    <div class="job-head"><p class="job-title">${esc(j.title)}</p>
+      <span class="state ${j.status}">${stateTxt} · ${esc(LANG[j.lang] || j.lang)}</span></div>
+    <div class="stages">${tr}${ok}${osm}</div>
+    ${j.error ? `<p class="msg err">${esc(j.error)}</p>` : ""}
+    ${j.note ? `<p class="msg note">${esc(j.note)}</p>` : ""}
+    ${dl ? `<div class="dl">${dl}</div>` : ""}
+    <div class="actions">
+      ${canResume ? `<button data-a="resume">Devam et</button>` : ""}
+      <button class="link danger" data-a="del">Sil</button>
+    </div></li>`;
+}
+
+let lastJobs = "";
+async function loadJobs() {
+  const jobs = await api("/api/jobs");
+  const key = JSON.stringify(jobs);
+  if (key === lastJobs) return;
+  lastJobs = key;
+  $("jobs").innerHTML = jobs.length ? jobs.map(jobHTML).join("")
+    : `<li class="empty">Henüz kitap yok. Yukarıdan bir kitap ekleyerek başlayın.</li>`;
+}
+
+$("jobs").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-a]"); if (!b) return;
+  const id = b.closest(".job").dataset.id;
+  if (b.dataset.a === "del") {
+    if (!confirm("Bu kitap Stüdyo listesinden silinsin mi? (Translate ve Kitap Okuma'daki kayıtlar ile sesli kitap silinmez.)")) return;
+    await api(`/api/jobs/${id}`, { method: "DELETE" });
+  } else {
+    await api(`/api/jobs/${id}/resume`, { method: "POST" });
+  }
+  lastJobs = ""; loadJobs();
+});
+
+// ---- yükleme: bilgisayar / sunucu ----
+let mode = "pc", srvData = null;
+const srvSel = new Set();
+const joinPath = (a, b) => (a ? a + "/" : "") + b;
+const fsize = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  mode = t.dataset.tab;
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
+  $("pcPane").hidden = mode !== "pc"; $("srvPane").hidden = mode !== "srv";
+  if (mode === "srv" && !srvData) loadSrv("");
+  label();
+}));
+
+function label() {
+  $("send").textContent = mode === "srv" && srvSel.size ? `Stüdyoya ekle (${srvSel.size} kitap)` : "Stüdyoya ekle";
+  $("srvsel").textContent = srvSel.size ? `Seçilenler: ${[...srvSel].map(p => p.split("/").pop()).join(", ")}`
+    : "Dosyalara tıklayarak seç; birden fazla seçebilirsin.";
+}
+
+async function loadSrv(path) {
+  try {
+    const d = await api(`/api/browse?path=${encodeURIComponent(path)}`);
+    if (!d.available) { $("srvlist").innerHTML = `<li><p class="hint" style="padding:12px">Sunucu kitap klasörü bağlı değil.</p></li>`; return; }
+    srvData = d; $("srvfilter").value = ""; renderSrv();
+  } catch (err) { $("srvlist").innerHTML = `<li><p class="hint" style="padding:12px">${esc(err.message)}</p></li>`; }
+}
+
+function renderSrv() {
+  const d = srvData, parts = d.path ? d.path.split("/") : [];
+  $("crumbs").innerHTML = `<button type="button" data-go="">Kitap</button>` + parts.map((p, i) =>
+    `<span>/</span><button type="button" data-go="${esc(parts.slice(0, i + 1).join("/"))}">${esc(p)}</button>`).join("");
+  const q = $("srvfilter").value.toLocaleLowerCase("tr");
+  const ok = (n) => !q || n.toLocaleLowerCase("tr").includes(q);
+  const up = d.path ? `<li><button type="button" data-go="${esc(parts.slice(0, -1).join("/"))}"><span class="ic">↩</span>Üst klasör</button></li>` : "";
+  const dirs = d.dirs.filter(ok).map(n => `<li><button type="button" data-go="${esc(joinPath(d.path, n))}"><span class="ic">📁</span>${esc(n)}</button></li>`).join("");
+  const files = d.files.filter(f => ok(f.name)).map(f => { const p = joinPath(d.path, f.name);
+    return `<li><button type="button" class="${srvSel.has(p) ? "sel" : ""}" data-file="${esc(p)}"><span class="ic">${srvSel.has(p) ? "✔" : "📄"}</span>${esc(f.name)}<span class="sz">${fsize(f.size)}</span></button></li>`; }).join("");
+  $("srvlist").innerHTML = up + dirs + files || `<li><p class="hint" style="padding:12px">Bu klasörde uygun dosya yok.</p></li>`;
+}
+
+$("srvfilter").addEventListener("input", () => srvData && renderSrv());
+$("srvPane").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.go !== undefined) return loadSrv(b.dataset.go);
+  if (b.dataset.file) { const p = b.dataset.file; srvSel.has(p) ? srvSel.delete(p) : srvSel.add(p); renderSrv(); label(); }
+});
+
+async function submit(files) {
+  $("send").disabled = true;
+  try {
+    if (mode === "srv") {
+      if (!srvSel.size) throw new Error("Önce sunucudan en az bir kitap seç.");
+      for (const p of srvSel) {
+        $("send").textContent = `Ekleniyor: ${p.split("/").pop()}`;
+        await api("/api/jobs/from-server", { method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ path: p, lang: $("lang").value }) });
+      }
+      srvSel.clear(); renderSrv();
+    } else {
+      if (!files.length) throw new Error("Önce bir kitap dosyası seç.");
+      for (const f of files) {
+        $("send").textContent = `Yükleniyor: ${f.name}`;
+        const fd = new FormData(); fd.append("file", f); fd.append("lang", $("lang").value);
+        await api("/api/jobs", { method: "POST", body: fd });
+      }
+      $("file").value = "";
+    }
+  } catch (err) { alert(err.message); }
+  $("send").disabled = false; label();
+  lastJobs = ""; loadJobs();
+}
+
+const drop = $("drop");
+drop.addEventListener("submit", (e) => { e.preventDefault(); submit([...$("file").files]); });
+["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => { mode = "pc"; submit([...e.dataTransfer.files]); });
+
+loadServices(); loadJobs();
+setInterval(() => loadJobs().catch(() => {}), 4000);
+setInterval(loadServices, 30000);
+</script>
+</body>
+</html>

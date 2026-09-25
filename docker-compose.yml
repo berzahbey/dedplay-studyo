@@ -1,0 +1,20 @@
+name: dedplay-studyo
+services:
+  app:
+    build: .
+    image: berzahbey/dedplay-studyo:latest
+    container_name: dedplay-studyo
+    restart: unless-stopped
+    ports:
+      - "8070:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /DATA/AppData/dedplay-studyo/data:/data
+      - /media/ZimaOS-HD/Kitap:/kaynak:ro
+      - /DATA/AppData/dedplay-kitap-okuma/seslendirme/text:/okuma-text:ro
+    environment:
+      - TRANSLATE_URL=http://host.docker.internal:8060
+      - OKUMA_URL=http://host.docker.internal:8020
+      - OSMANLICA_URL=http://host.docker.internal:8089
+      - OSM_USE_OLLAMA=false

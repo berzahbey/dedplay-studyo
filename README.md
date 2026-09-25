@@ -1,5 +1,7 @@
 # Dedplay Studio
 
+<img src="icon.png" width="160" alt="Dedplay Studio ikonu">
+
 Kitabı bir kez ver, gerisini Stüdyo halleder:
 
 1. Kitap Türkçe değilse **Dedplay Translate** Türkçeye çevirir.

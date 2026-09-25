@@ -201,8 +201,44 @@ def save_outputs(job_id):
         for fmt in ("epub", "pdf"):
             clients.tr_download(j["tr_job"], fmt, os.path.join(
                 folder, subdir[fmt], f"{j['title']} - Çeviri ve aslı.{fmt}".replace("/", "-")), 1)
+    # MP3 parçaları: kitap adıyla, ek yer kaplamadan (aynı dosyaya ikinci ad = sabit bağlantı)
+    mp3s = sorted(glob.glob(os.path.join(glob.escape(folder), "Parca_*.mp3")), key=_natural)
+    if mp3s:
+        mdir = os.path.join(folder, "MP3")
+        shutil.rmtree(mdir, ignore_errors=True)
+        os.makedirs(mdir)
+        open(os.path.join(mdir, ".ignore"), "w").close()  # Audiobookshelf bu klasörü taramasın
+        total = max(_natural(x) for x in mp3s)
+        width = max(3, len(str(total)))
+        for src in mp3s:
+            n = _natural(src)
+            dst = os.path.join(mdir, f"{name} - {n:0{width}d}.mp3")
+            try:
+                os.link(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
+            _tag_mp3(dst, name, n, total, width)
     db.update(job_id, saved=name, note=None)
     return name
+
+
+def _tag_mp3(path, book, n, total, width):
+    """MP3'ün içine kitap bilgisini yazar (albüm = kitap adı, sıra numarası)."""
+    try:
+        from mutagen.easyid3 import EasyID3
+        from mutagen.id3 import ID3NoHeaderError
+        try:
+            t = EasyID3(path)
+        except ID3NoHeaderError:
+            t = EasyID3()
+        t["album"] = book
+        t["title"] = f"{book} - {n:0{width}d}"
+        t["tracknumber"] = f"{n}/{total}"
+        t["artist"] = "Dedplay"
+        t["genre"] = "Audiobook"
+        t.save(path)
+    except Exception:
+        pass
 
 
 def resume(job_id):

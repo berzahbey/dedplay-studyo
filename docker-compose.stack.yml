@@ -43,9 +43,13 @@ services:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/studyo
         target: /data
+        bind:
+          create_host_path: true
       - type: bind
         source: /DATA/AppData/dedplay-studyo/kitap-okuma/text
         target: /okuma-text
+        bind:
+          create_host_path: true
         read_only: true
       - type: bind
         source: *kitap
@@ -85,6 +89,8 @@ services:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/translate
         target: /data
+        bind:
+          create_host_path: true
       - type: bind
         source: *kitap
         target: /kaynak
@@ -102,6 +108,8 @@ services:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/ollama
         target: /root/.ollama
+        bind:
+          create_host_path: true
 
   # ---------------- Kitap Okuma: sesli kitap (Piper) ----------------
   kitap-okuma:
@@ -114,12 +122,18 @@ services:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/kitap-okuma/book
         target: /app/books
+        bind:
+          create_host_path: true
       - type: bind
         source: /DATA/AppData/dedplay-studyo/kitap-okuma/text
         target: /app/text
+        bind:
+          create_host_path: true
       - type: bind
         source: /DATA/AppData/dedplay-studyo/kitap-okuma/voices
         target: /root/.cache/piper
+        bind:
+          create_host_path: true
       - type: bind
         source: *kitap
         target: /app/kaynak-kitaplar
@@ -144,6 +158,8 @@ services:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/osmanlica
         target: /data
+        bind:
+          create_host_path: true
 
   # ---------------- Osmanlıca çevirici için Ollama modelini bir kez indirir ----------------
   # (İş bitince durur; ZimaOS'ta "durdu" görünmesi normaldir.)

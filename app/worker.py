@@ -173,7 +173,8 @@ class Worker(threading.Thread):
 
 
 def save_outputs(job_id):
-    """Biten kitabın bütün dosyalarını çıktı klasörüne, sesli kitabın yanına kaydeder."""
+    """Biten kitabın dosyalarını çıktı klasörüne kaydeder: M4B kitap klasörünün üstünde kalır,
+    diğer dosyalar biçimlerine göre alt klasörlere (EPUB, PDF, Word, HTML, TXT) ayrılır."""
     if not os.path.isdir(OUTPUT_DIR):
         raise RuntimeError("Çıktı klasörü bağlı değil (docker-compose'da /cikti).")
     from .export import build
@@ -184,15 +185,22 @@ def save_outputs(job_id):
     name = (j["book_name"] or j["title"]).replace("/", "-")
     folder = os.path.join(OUTPUT_DIR, name)
     os.makedirs(folder, exist_ok=True)
-    for variant in ("tr", "osm", "iki"):
-        for fmt in ("epub", "pdf", "docx"):
+    subdir = {"epub": "EPUB", "pdf": "PDF", "docx": "Word", "html": "HTML", "txt": "TXT"}
+    # Eski sürümün klasörün üstüne bıraktığı dağınık dosyaları temizle (M4B ve MP3'e dokunma)
+    for f in os.listdir(folder):
+        fp = os.path.join(folder, f)
+        if os.path.isfile(fp) and os.path.splitext(f)[1].lower().lstrip(".") in subdir:
+            os.remove(fp)
+    for fmt, sd in subdir.items():
+        os.makedirs(os.path.join(folder, sd), exist_ok=True)
+        for variant in ("tr", "osm", "iki"):
             data, _, fname = build(j, parts, fmt, variant)
-            with open(os.path.join(folder, fname.replace("/", "-")), "wb") as f:
+            with open(os.path.join(folder, sd, fname.replace("/", "-")), "wb") as f:
                 f.write(data)
     if j["tr_job"]:
         for fmt in ("epub", "pdf"):
-            clients.tr_download(j["tr_job"], fmt,
-                                os.path.join(folder, f"{j['title']} - Çeviri ve aslı.{fmt}".replace("/", "-")), 1)
+            clients.tr_download(j["tr_job"], fmt, os.path.join(
+                folder, subdir[fmt], f"{j['title']} - Çeviri ve aslı.{fmt}".replace("/", "-")), 1)
     db.update(job_id, saved=name, note=None)
     return name
 

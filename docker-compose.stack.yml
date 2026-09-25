@@ -2,6 +2,7 @@
 #  DEDPLAY STUDIO — HEPSİ BİR ARADA KURULUM
 #  Tek seferde 5 uygulama kurulur:
 #    Stüdyo (8070) · Translate (8060) · Kitap Okuma (8020) · Osmanlıca çevirici (8089) · Ollama (11435)
+#  + işlemci ayarı servisi: ZimaOS'un koyduğu 1 çekirdek sınırını otomatik kaldırır.
 #  Uygulamalar birbirine sunucunun kendisi üzerinden (portlarla) ulaşır; ZimaOS'un ağ ayarından etkilenmez.
 #  Uygulamaların kendi verileri otomatik olarak /DATA/AppData/dedplay-studyo/ altına gider.
 #
@@ -178,6 +179,33 @@ services:
     environment:
       OLLAMA_HOST: http://host.docker.internal:11435
     entrypoint: ["/bin/sh", "-c", "sleep 10; ollama pull qwen2.5:7b"]
+
+  # ---------------- İşlemci ayarı ----------------
+  # ZimaOS "Özel Kurulum"da her uygulamaya kendiliğinden 1 çekirdek sınırı koyabiliyor.
+  # Bu servis dakikada bir kontrol eder ve sınırı sunucunun bütün çekirdeklerine çıkarır
+  # (çekirdek sayısını kendisi algılar). Elle bir şey yapmana gerek yok.
+  islemci-ayari:
+    image: docker:cli
+    container_name: dedplay-islemci-ayari
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        N=$$(nproc); echo "Sunucuda $$N iş parçacığı var"
+        while true; do
+          for c in dedplay-studyo dedplay-translate dedplay-ollama dedplay-kitap-okuma osmanlica-cevirici; do
+            cur=$$(docker inspect -f '{{.HostConfig.NanoCpus}}' $$c 2>/dev/null) || continue
+            if [ "$$cur" != "0" ] && [ "$$cur" -lt "$$((N * 1000000000))" ]; then
+              docker update --cpus "$$N" "$$c" >/dev/null && echo "$$c: işlemci sınırı $$N çekirdeğe çıkarıldı"
+            fi
+          done
+          sleep 60
+        done
 
 x-casaos:
   architectures: [amd64]

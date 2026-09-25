@@ -40,6 +40,12 @@ sol taraftaki sayıyı değiştir.
 
 İlk açılışta çeviri modeli (~8 GB) ve Osmanlıca çevirici modeli (~5 GB) iner.
 
+### İşlemci sınırı hakkında
+
+ZimaOS "Özel Kurulum"da uygulamalara kendiliğinden 1 çekirdek sınırı koyabiliyor. Stack'teki
+`islemci-ayari` servisi bunu dakikada bir kontrol eder ve sınırı sunucunun bütün çekirdeklerine
+çıkarır. Elle bir şey yapmana gerek yok. Durumu görmek için: `docker logs dedplay-islemci-ayari`
+
 ## Kurulum 2: Sadece Stüdyo (diğerleri ayrı kuruluysa)
 
 ```bash

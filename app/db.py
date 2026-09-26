@@ -101,6 +101,14 @@ def insert_parts(job_id, items):
                       [(job_id, i, n, t) for i, (n, t) in enumerate(items)])
 
 
+def reset_osm(job_id):
+    """Osmanlıcayı sıfırlar (seslendirmeye dokunmaz); parçalar yeniden çevrilir."""
+    with conn() as c:
+        c.execute("UPDATE parts SET osm=NULL WHERE job_id=?", (job_id,))
+        c.execute("UPDATE jobs SET osm_state='calisiyor', osm_done=0, osm_title=NULL, status='active', "
+                  "stage='produce', error=NULL, note=NULL WHERE id=?", (job_id,))
+
+
 def pending_parts(job_id):
     return q("SELECT * FROM parts WHERE job_id=? AND osm IS NULL ORDER BY idx", (job_id,))
 

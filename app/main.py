@@ -121,6 +121,17 @@ def resume_job(job_id: int):
     return {"ok": True}
 
 
+@app.post("/api/jobs/{job_id}/redo-osm")
+def redo_osm(job_id: int):
+    j = db.get(job_id)
+    if not j or not db.all_parts(job_id):
+        raise HTTPException(409, "Bu kitabın metin parçaları yok.")
+    if j["status"] == "active" and j["osm_state"] == "calisiyor":
+        raise HTTPException(409, "Osmanlıca çeviri zaten sürüyor.")
+    db.reset_osm(job_id)
+    return {"ok": True}
+
+
 @app.post("/api/jobs/{job_id}/save")
 def save_job(job_id: int):
     j = db.get(job_id)

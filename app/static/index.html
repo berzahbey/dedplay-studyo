@@ -217,6 +217,7 @@ function jobHTML(j) {
     ${dl ? `<div class="dl">${dl}</div>` : ""}
     <div class="actions">
       ${canResume ? `<button data-a="resume">Devam et</button>` : ""}
+      ${j.status === "done" && j.osm_total ? `<button data-a="redo">Osmanlıcayı yeniden çevir</button>` : ""}
       ${j.status === "done" ? `<button data-a="save">${j.saved ? "Çıktı klasörüne yeniden kaydet" : "Çıktı klasörüne kaydet"}</button>` : ""}
       <button class="link danger" data-a="del">Sil</button>
     </div></li>`;
@@ -238,6 +239,9 @@ $("jobs").addEventListener("click", async (e) => {
   if (b.dataset.a === "del") {
     if (!confirm("Bu kitap Stüdyo listesinden silinsin mi? (Translate ve Kitap Okuma'daki kayıtlar ile sesli kitap silinmez.)")) return;
     await api(`/api/jobs/${id}`, { method: "DELETE" });
+  } else if (b.dataset.a === "redo") {
+    if (!confirm("Osmanlıca metin güncel sözlükle yeniden çevrilsin mi? Seslendirmeye dokunulmaz; bitince dosyalar çıktı klasörüne yeniden kaydedilir.")) return;
+    try { await api(`/api/jobs/${id}/redo-osm`, { method: "POST" }); } catch (err) { alert(err.message); }
   } else if (b.dataset.a === "save") {
     b.disabled = true; b.textContent = "Kaydediliyor…";
     try { await api(`/api/jobs/${id}/save`, { method: "POST" }); } catch (err) { alert(err.message); }

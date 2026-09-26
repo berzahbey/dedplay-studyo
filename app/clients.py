@@ -41,6 +41,13 @@ def tr_download(tid, fmt, dest, bilingual=0):
                 f.write(chunk)
 
 
+def tr_text(tid):
+    """Translate'in çevirdiği Türkçe metnin düz hâli (TXT, aslı olmadan)."""
+    r = requests.get(f"{TRANSLATE}/api/jobs/{tid}/download", params={"fmt": "txt", "bilingual": 0}, timeout=600)
+    r.raise_for_status()
+    return r.content
+
+
 def tr_stream(tid, fmt, bilingual):
     r = requests.get(f"{TRANSLATE}/api/jobs/{tid}/download", params={"fmt": fmt, "bilingual": bilingual},
                      stream=True, timeout=600)

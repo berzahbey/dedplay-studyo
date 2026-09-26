@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libpango-1.0-0 libpangoft2-1.0-0 fonts-noto-core fontconfig \
+      libpango-1.0-0 libpangoft2-1.0-0 fonts-noto-core fontconfig tesseract-ocr tesseract-ocr-tur \
     && rm -rf /var/lib/apt/lists/*
 ADD https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf /usr/share/fonts/truetype/amiri/Amiri-Regular.ttf
 ADD https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf /usr/share/fonts/truetype/amiri/Amiri-Bold.ttf

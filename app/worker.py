@@ -17,7 +17,7 @@ import traceback
 
 import requests
 
-from . import clients, db
+from . import clients, db, textsrc
 from .detect import detect_lang, sample_text
 
 TEXT_DIR = os.environ.get("OKUMA_TEXT_DIR", "/okuma-text")
@@ -54,6 +54,7 @@ class Worker(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True)
         self.seen = {}  # job_id -> (dosya sayısı, kaç turdur sabit)
+        self.no_orig = set()  # ilk metni çıkarılamayan işler (Kitap Okuma'nın metnine dönülür)
 
     def run(self):
         while True:
@@ -156,6 +157,16 @@ class Worker(threading.Thread):
         jid, state = j["id"], j["osm_state"]
         if state == "bitti":
             return
+        if state == "bekliyor" and jid not in self.no_orig:
+            # Osmanlıca ve Türkçe dosyalar için kitabın İLK metni kullanılır
+            # (Kitap Okuma'nın metni seslendirme için değiştirilmiştir).
+            items = self.original_parts(j)
+            if items:
+                db.insert_parts(jid, items)
+                db.update(jid, osm_state="calisiyor", osm_done=0, osm_total=len(items))
+                return
+            self.no_orig.add(jid)
+            print(f"[{jid}] Kitabın ilk metni çıkarılamadı; Kitap Okuma'nın metni kullanılacak.", flush=True)
         if state == "bekliyor":
             files = sorted(glob.glob(os.path.join(TEXT_DIR, glob.escape(j["book_name"]), "Parca_*.txt")),
                            key=_natural)
@@ -181,6 +192,25 @@ class Worker(threading.Thread):
                 if time.time() > end:
                     return
             db.update(jid, osm_state="bitti")
+
+
+def _original_parts(j):
+    try:
+        if j["lang"] == "tr":
+            paras = textsrc.extract(db.source_path(j["id"], j["filename"]))
+        else:
+            if not j["tr_job"]:
+                return []
+            paras = textsrc.from_txt_bytes(clients.tr_text(j["tr_job"]), skip_title=True)
+        if sum(len(p) for p in paras) < 50:
+            return []
+        return textsrc.to_parts(paras)
+    except Exception:
+        traceback.print_exc()
+        return []
+
+
+Worker.original_parts = staticmethod(_original_parts)
 
 
 def save_outputs(job_id):

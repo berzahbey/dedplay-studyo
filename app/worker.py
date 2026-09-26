@@ -35,6 +35,26 @@ def ok_filename(j):
     return j["book_name"] + ".epub"
 
 
+def txt_to_epub(txt_path, title, out_path):
+    """Kitap Okuma sadece PDF/EPUB kabul ettiği için düz metni basit bir EPUB'a çevirir."""
+    import html as _html
+    from ebooklib import epub
+    text = open(txt_path, encoding="utf-8").read()
+    paras = [p.strip() for p in re.split(r"\n\s*\n|\n", text) if p.strip()]
+    book = epub.EpubBook()
+    book.set_identifier(f"dedplay-metin-{abs(hash(title))}")
+    book.set_title(title)
+    book.set_language("tr")
+    ch = epub.EpubHtml(title=title, file_name="metin.xhtml", lang="tr")
+    ch.content = "<html><body>" + "".join(f"<p>{_html.escape(p)}</p>" for p in paras) + "</body></html>"
+    book.add_item(ch)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = ["nav", ch]
+    epub.write_epub(out_path, book)
+    return out_path
+
+
 def _natural(path):
     m = re.search(r"(\d+)", os.path.basename(path))
     return int(m.group(1)) if m else 0
@@ -130,6 +150,9 @@ class Worker(threading.Thread):
         if state == "bekliyor":
             if j["lang"] == "tr":
                 path, filename = src, name + os.path.splitext(j["filename"])[1].lower()
+                if filename.endswith(".txt"):  # yapıştırılan metin: Kitap Okuma için EPUB'a çevir
+                    path = txt_to_epub(src, name, os.path.join(db.job_dir(jid), name + ".epub"))
+                    filename = name + ".epub"
             else:
                 path, filename = os.path.join(db.job_dir(jid), name + ".epub"), name + ".epub"
             clients.ok_submit(path, filename)

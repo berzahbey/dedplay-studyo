@@ -104,6 +104,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
     <div class="tabs" role="tablist">
       <button type="button" class="tab on" data-tab="pc" role="tab">Bilgisayardan yükle</button>
       <button type="button" class="tab" data-tab="srv" role="tab">Sunucudan seç</button>
+      <button type="button" class="tab" data-tab="txt" role="tab">Metin yapıştır</button>
     </div>
     <div id="pcPane">
       <p style="margin:0 0 10px"><strong>Kitap dosyasını buraya bırakın</strong> ya da seçin.</p>
@@ -116,6 +117,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       </div>
       <ul class="srvlist" id="srvlist"></ul>
       <p class="hint" id="srvsel">Dosyalara tıklayarak seç; birden fazla seçebilirsin.</p>
+    </div>
+    <div id="txtPane" hidden style="display:grid;gap:10px">
+      <input type="text" id="txtTitle" placeholder="Başlık (boş bırakırsan metnin ilk kelimelerinden oluşur)">
+      <textarea id="txtBody" rows="10" placeholder="Metni buraya yapıştır ya da yaz. Hangi dilde olursa olsun: Türkçe değilse önce çevrilir."
+        style="font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:10px;resize:vertical;line-height:1.6"></textarea>
+      <p class="hint" id="txtCount">0 karakter</p>
     </div>
     <div class="row">
       <label class="f">Kitap dili
@@ -260,7 +267,7 @@ const fsize = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1
 document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
   mode = t.dataset.tab;
   document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
-  $("pcPane").hidden = mode !== "pc"; $("srvPane").hidden = mode !== "srv";
+  $("pcPane").hidden = mode !== "pc"; $("srvPane").hidden = mode !== "srv"; $("txtPane").hidden = mode !== "txt";
   if (mode === "srv" && !srvData) loadSrv("");
   label();
 }));
@@ -293,6 +300,10 @@ function renderSrv() {
 }
 
 $("srvfilter").addEventListener("input", () => srvData && renderSrv());
+$("txtBody").addEventListener("input", () => {
+  const n = $("txtBody").value.length;
+  $("txtCount").textContent = n.toLocaleString("tr") + " karakter";
+});
 $("srvPane").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.dataset.go !== undefined) return loadSrv(b.dataset.go);
@@ -302,7 +313,14 @@ $("srvPane").addEventListener("click", (e) => {
 async function submit(files) {
   $("send").disabled = true;
   try {
-    if (mode === "srv") {
+    if (mode === "txt") {
+      const text = $("txtBody").value.trim();
+      if (text.length < 20) throw new Error("Önce en az birkaç cümlelik bir metin yapıştır.");
+      $("send").textContent = "Ekleniyor…";
+      await api("/api/jobs/from-text", { method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ text, title: $("txtTitle").value, lang: $("lang").value }) });
+      $("txtBody").value = ""; $("txtTitle").value = ""; $("txtCount").textContent = "0 karakter";
+    } else if (mode === "srv") {
       if (!srvSel.size) throw new Error("Önce sunucudan en az bir kitap seç.");
       for (const p of srvSel) {
         $("send").textContent = `Ekleniyor: ${p.split("/").pop()}`;

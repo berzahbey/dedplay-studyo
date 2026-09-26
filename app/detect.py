@@ -53,7 +53,7 @@ def sample_text(path, limit=40000):
 def detect_lang(text):
     """'tr', 'ar', 'en', 'fr' ya da None (metin yok/az)."""
     letters = LETTER.findall(text)
-    if len(letters) < 200:
+    if len(letters) < 40:  # yapıştırılan kısa metinler için düşük eşik
         return None
     if len(ARABIC.findall(text)) / len(letters) > 0.3:
         return "ar"

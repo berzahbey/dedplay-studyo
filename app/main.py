@@ -115,6 +115,32 @@ def job_from_server(f: ServerFile):
     return {"id": jid}
 
 
+class PastedText(BaseModel):
+    text: str
+    title: str = ""
+    lang: str = "auto"
+
+
+@app.post("/api/jobs/from-text")
+def job_from_text(t: PastedText):
+    import re as _re
+    import time as _time
+    text = (t.text or "").strip()
+    if len(text) < 20:
+        raise HTTPException(400, "Metin çok kısa.")
+    title = (t.title or "").strip()
+    if not title:  # metnin ilk satırının ilk kelimeleri (kesme işaretleri korunur)
+        title = " ".join(_re.split(r"[.!?:\n]", text)[0].split()[:8]).strip(" .,;:!?-" + chr(8211) + chr(8212) + chr(34) + chr(39))
+    title = _re.sub("[" + _re.escape(chr(92) + "/:*?" + chr(34) + "<>|") + "]+", " ", title)
+    title = _re.sub(r"\s+", " ", title).strip(" .")[:80] or _time.strftime("Metin %Y-%m-%d %H.%M")
+    name = title + ".txt"
+    jid = _new_job(name, t.lang)
+    with open(db.source_path(jid, name), "w", encoding="utf-8") as f:
+        f.write(text + "\n")
+    db.update(jid, status="active")
+    return {"id": jid}
+
+
 @app.post("/api/jobs/{job_id}/resume")
 def resume_job(job_id: int):
     resume(job_id)

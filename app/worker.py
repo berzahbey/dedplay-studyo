@@ -220,6 +220,12 @@ def save_outputs(job_id):
         raise RuntimeError("Çıktı klasörü bağlı değil (docker-compose'da /cikti).")
     from .export import build
     j = db.get(job_id)
+    if not j["osm_title"]:
+        try:
+            db.update(job_id, osm_title=clients.osm_convert(j["title"]).strip())
+            j = db.get(job_id)
+        except Exception:
+            pass
     parts = db.all_parts(job_id)
     if not parts:
         raise RuntimeError("Metin parçaları yok.")

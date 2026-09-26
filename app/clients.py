@@ -101,7 +101,9 @@ def ok_stream(path):
 # ---------------- Osmanlıca çevirici ----------------
 def osm_convert(text, timeout=900):
     r = requests.post(f"{OSMANLICA}/api/upload-text",
-                      data={"text": text, "use_ollama": "true" if OSM_OLLAMA else "false"}, timeout=T)
+                      data={"text": text, "use_ollama": "true" if OSM_OLLAMA else "false",
+                            "turkce": "true"},  # metin zaten Türkçe: dil tespiti yapılmasın
+                      timeout=T)
     r.raise_for_status()
     jid = r.json()["job_id"]
     end = time.time() + timeout

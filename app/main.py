@@ -135,6 +135,8 @@ def job_from_text(t: PastedText):
     title = _re.sub(r"\s+", " ", title).strip(" .")[:80] or _time.strftime("Metin %Y-%m-%d %H.%M")
     name = title + ".txt"
     jid = _new_job(name, t.lang)
+    # auto_title: 0 = dosya, 1 = metin (otomatik başlık, çeviri bitince Türkçeden yeniden), 2 = metin (başlığı kullanıcı yazdı)
+    db.update(jid, auto_title=2 if (t.title or "").strip() else 1)
     with open(db.source_path(jid, name), "w", encoding="utf-8") as f:
         f.write(text + "\n")
     db.update(jid, status="active")

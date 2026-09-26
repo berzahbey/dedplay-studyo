@@ -157,6 +157,14 @@ def extract(path):
     return []
 
 
+def make_title(text: str) -> str:
+    """Metnin ilk cümlesinin ilk kelimelerinden dosya adına uygun bir başlık."""
+    first = re.split(r"[.!?:\n]", (text or "").strip())[0]
+    title = " ".join(first.split()[:8]).strip(" .,;:!?-" + chr(8211) + chr(8212) + chr(34) + chr(39))
+    title = re.sub("[" + re.escape(chr(92) + "/:*?" + chr(34) + "<>|") + "]+", " ", title)
+    return re.sub(r"\s+", " ", title).strip(" .")[:80]
+
+
 def to_parts(paras, size=PART_CHARS):
     """Paragrafları ~3000 karakterlik parçalara toplar; paragraf sınırları satır sonuyla korunur."""
     parts, cur = [], []

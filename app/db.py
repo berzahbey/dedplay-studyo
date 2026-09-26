@@ -47,6 +47,8 @@ def init():
         cols = [r[1] for r in c.execute("PRAGMA table_info(jobs)")]
         if "saved" not in cols:
             c.execute("ALTER TABLE jobs ADD COLUMN saved TEXT")
+        if "auto_title" not in cols:
+            c.execute("ALTER TABLE jobs ADD COLUMN auto_title INTEGER DEFAULT 0")
 
 
 def job_dir(job_id):

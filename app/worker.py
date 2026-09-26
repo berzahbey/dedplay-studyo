@@ -119,6 +119,15 @@ class Worker(threading.Thread):
             db.update(jid, tr_done=t["done"], tr_total=t["total"], tr_state=state,
                       error=f"Çeviri durdu: {t['error']}" if state == "hata" else None)
             if state == "bitti":
+                if j["auto_title"] == 1:  # otomatik başlık: Türkçe çevirinin ilk cümlesinden yeniden
+                    try:
+                        paras = textsrc.from_txt_bytes(clients.tr_text(j["tr_job"]), skip_title=True)
+                        yeni = textsrc.make_title(" ".join(paras[:1]))
+                        if yeni:
+                            db.update(jid, title=yeni)
+                            j = db.get(jid)
+                    except Exception:
+                        pass
                 name = f"{j['title']} - Türkçe"
                 clients.tr_download(j["tr_job"], "epub", os.path.join(db.job_dir(jid), name + ".epub"))
                 db.update(jid, stage="produce", book_name=name)
@@ -129,6 +138,9 @@ class Worker(threading.Thread):
             self.step_osm(db.get(jid))
             j = db.get(jid)
             if j["ok_state"] == "bitti" and j["osm_state"] == "bitti":
+                if not j["osm_title"] and j["lang"] != "tr" and not j["auto_title"]:
+                    db.update(jid, osm_title=j["title"])  # yabancı dosya adı Osmanlıcaya harf harf aktarılmaz
+                    j = db.get(jid)
                 if not j["osm_title"]:
                     try:
                         db.update(jid, osm_title=clients.osm_convert(j["title"]).strip())
@@ -243,6 +255,9 @@ def save_outputs(job_id):
         raise RuntimeError("Çıktı klasörü bağlı değil (docker-compose'da /cikti).")
     from .export import build
     j = db.get(job_id)
+    if not j["osm_title"] and j["lang"] != "tr" and not j["auto_title"]:
+        db.update(job_id, osm_title=j["title"])
+        j = db.get(job_id)
     if not j["osm_title"]:
         try:
             db.update(job_id, osm_title=clients.osm_convert(j["title"]).strip())

@@ -67,6 +67,15 @@ def ok_status(book_name):
     return None, None, None
 
 
+def ok_clear(filename):
+    """Kitap Okuma'nın durum listesinden bu kitabı kaldırır (hata olursa sessizce geçer)."""
+    from urllib.parse import quote
+    try:
+        requests.delete(f"{OKUMA}/status/{quote(filename, safe='')}", timeout=T)
+    except Exception:
+        pass
+
+
 def ok_library_entry(book_name):
     r = requests.get(f"{OKUMA}/library", timeout=T)
     r.raise_for_status()

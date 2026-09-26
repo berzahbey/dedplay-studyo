@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from . import clients, db
 from .export import FORMATS, build
-from .worker import resume, save_outputs, worker
+from .worker import ok_filename, resume, save_outputs, worker
 
 app = FastAPI(title="Dedplay Studio")
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -134,6 +134,9 @@ def save_job(job_id: int):
 
 @app.delete("/api/jobs/{job_id}")
 def delete_job(job_id: int):
+    j = db.get(job_id)
+    if j and ok_filename(j):
+        clients.ok_clear(ok_filename(j))  # Kitap Okuma'nın listesinden de kaldır
     db.delete_job(job_id)
     return {"ok": True}
 

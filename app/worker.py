@@ -26,6 +26,15 @@ TICK = 4
 OSM_BUDGET = 20  # saniye: her turda Osmanlıcaya ayrılan en fazla süre
 
 
+def ok_filename(j):
+    """Kitabın Kitap Okuma'ya hangi dosya adıyla gönderildiği."""
+    if not j["book_name"]:
+        return None
+    if j["lang"] == "tr":
+        return j["book_name"] + os.path.splitext(j["filename"])[1].lower()
+    return j["book_name"] + ".epub"
+
+
 def _natural(path):
     m = re.search(r"(\d+)", os.path.basename(path))
     return int(m.group(1)) if m else 0
@@ -109,6 +118,8 @@ class Worker(threading.Thread):
                     save_outputs(jid)
                 except Exception as e:
                     db.update(jid, note=f"Dosyalar çıktı klasörüne kaydedilemedi: {str(e)[:200]}")
+                if ok_filename(j):
+                    clients.ok_clear(ok_filename(j))  # Kitap Okuma'nın listesinden kaldır
 
     # ------------------------------------------------------------
     def step_okuma(self, j, src):

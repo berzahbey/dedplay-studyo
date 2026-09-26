@@ -75,6 +75,7 @@ class Worker(threading.Thread):
         super().__init__(daemon=True)
         self.seen = {}  # job_id -> (dosya sayısı, kaç turdur sabit)
         self.no_orig = set()  # ilk metni çıkarılamayan işler (Kitap Okuma'nın metnine dönülür)
+        self.kayip = {}  # job_id -> Kitap Okuma listesinde kaç turdur görünmüyor
 
     def run(self):
         while True:
@@ -181,6 +182,17 @@ class Worker(threading.Thread):
             elif state != "hata":
                 upd["ok_state"] = "calisiyor" if "process" in low or "işlen" in low else "sirada"
         entry = clients.ok_library_entry(name)
+        # Bekçi: seslendirme sürüyor görünüp Kitap Okuma'nın listesinde hiç yoksa (Kitap Okuma yeniden
+        # başladıysa yarım kalan işi unutur) ~1 dakika sonra yeniden gönder; kaldığı yerden devam eder.
+        if not status and not entry and state in ("sirada", "calisiyor"):
+            self.kayip[jid] = self.kayip.get(jid, 0) + 1
+            if self.kayip[jid] >= 15:
+                self.kayip.pop(jid, None)
+                print(f"[{jid}] Kitap Okuma '{name}' kitabını listesinde tutmuyor; yeniden gönderiliyor.", flush=True)
+                db.update(jid, ok_state="bekliyor")
+                return
+        else:
+            self.kayip.pop(jid, None)
         if entry:
             upd.update(ok_state="bitti", audio=json.dumps(entry, ensure_ascii=False))
             if upd.get("ok_total") or j["ok_total"]:

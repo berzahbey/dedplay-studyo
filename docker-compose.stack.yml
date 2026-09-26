@@ -192,20 +192,10 @@ services:
       - type: bind
         source: /var/run/docker.sock
         target: /var/run/docker.sock
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        N=$$(nproc); echo "Sunucuda $$N iş parçacığı var"
-        while true; do
-          for c in dedplay-studyo dedplay-translate dedplay-ollama dedplay-kitap-okuma osmanlica-cevirici; do
-            cur=$$(docker inspect -f '{{.HostConfig.NanoCpus}}' $$c 2>/dev/null) || continue
-            if [ "$$cur" != "0" ] && [ "$$cur" -lt "$$((N * 1000000000))" ]; then
-              docker update --cpus "$$N" "$$c" >/dev/null && echo "$$c: işlemci sınırı $$N çekirdeğe çıkarıldı"
-            fi
-          done
-          sleep 60
-        done
+    # Betik kodlanmış (base64) olarak duruyor: içinde dolar işareti geçmediği için ZimaOS ve
+    # Docker Compose onu bozamaz. Çözülmüş hâli: dakikada bir diğer uygulamaların işlemci
+    # sınırına bakar, sunucunun çekirdek sayısından azsa (nproc) en yükseğe çıkarır.
+    entrypoint: ["/bin/sh", "-c", "echo Tj0kKG5wcm9jKTsgZWNobyAiU3VudWN1ZGEgJE4gacWfIHBhcsOnYWPEscSfxLEgdmFyIgp3aGlsZSB0cnVlOyBkbwogIGZvciBjIGluIGRlZHBsYXktc3R1ZHlvIGRlZHBsYXktdHJhbnNsYXRlIGRlZHBsYXktb2xsYW1hIGRlZHBsYXkta2l0YXAtb2t1bWEgb3NtYW5saWNhLWNldmlyaWNpOyBkbwogICAgY3VyPSQoZG9ja2VyIGluc3BlY3QgLWYgJ3t7Lkhvc3RDb25maWcuTmFub0NwdXN9fScgJGMgMj4vZGV2L251bGwpIHx8IGNvbnRpbnVlCiAgICBpZiBbICIkY3VyIiAhPSAiMCIgXSAmJiBbICIkY3VyIiAtbHQgIiQoKE4gKiAxMDAwMDAwMDAwKSkiIF07IHRoZW4KICAgICAgZG9ja2VyIHVwZGF0ZSAtLWNwdXMgIiROIiAiJGMiID4vZGV2L251bGwgJiYgZWNobyAiJGM6IGnFn2xlbWNpIHPEsW7EsXLEsSAkTiDDp2VraXJkZcSfZSDDp8Sxa2FyxLFsZMSxIgogICAgZmkKICBkb25lCiAgc2xlZXAgNjAKZG9uZQo= | base64 -d | sh"]
 
 x-casaos:
   architectures: [amd64]

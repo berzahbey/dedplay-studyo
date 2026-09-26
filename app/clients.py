@@ -99,6 +99,22 @@ def ok_stream(path):
 
 
 # ---------------- Osmanlıca çevirici ----------------
+_AYRAC = "\u00b6"  # ¶
+
+
+def osm_convert_paras(text, timeout=900):
+    """Paragrafları ¶ ayracıyla gönderir ve aynı ayraçtan böler: çevirici bir satırı silse ya da
+    birleştirse bile her Türkçe paragrafın karşısında kendi Osmanlıcası durur."""
+    paras = text.split("\n")
+    if len(paras) < 2:
+        return osm_convert(text, timeout)
+    out = osm_convert(("\n" + _AYRAC + "\n").join(paras), timeout)
+    parcalar = [p.strip() for p in out.split(_AYRAC)]
+    if len(parcalar) != len(paras):
+        return out.replace(_AYRAC, "")  # beklenmedik durum: eski davranış
+    return "\n".join(parcalar)
+
+
 def osm_convert(text, timeout=900):
     r = requests.post(f"{OSMANLICA}/api/upload-text",
                       data={"text": text, "use_ollama": "true" if OSM_OLLAMA else "false",

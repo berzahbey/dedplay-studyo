@@ -223,7 +223,7 @@ class Worker(threading.Thread):
             pending = db.pending_parts(jid)
             for p in pending:
                 text = p["tr"] or ""
-                db.save_part(jid, p["idx"], clients.osm_convert(text) if text.strip() else "")
+                db.save_part(jid, p["idx"], clients.osm_convert_paras(text) if text.strip() else "")
                 if time.time() > end:
                     return
             db.update(jid, osm_state="bitti")

@@ -167,6 +167,7 @@ def make_title(text: str) -> str:
 
 def to_parts(paras, size=PART_CHARS):
     """Paragrafları ~3000 karakterlik parçalara toplar; paragraf sınırları satır sonuyla korunur."""
+    paras = [p for p in paras if any(ch.isalnum() for ch in p)]  # "-----", "*****" gibi süs satırları atlanır
     parts, cur = [], []
     length = 0
     for p in paras:

@@ -218,6 +218,12 @@ def save_outputs(job_id):
             except OSError:
                 shutil.copy2(src, dst)
             _tag_mp3(dst, name, n, total, width)
+        # MP3 klasöründeki kopyalar aynı dosyanın ikinci adı; üstteki Parca_ adları artık gereksiz.
+        for src in mp3s:
+            try:
+                os.remove(src)
+            except OSError:
+                pass
     db.update(job_id, saved=name, note=None)
     return name
 

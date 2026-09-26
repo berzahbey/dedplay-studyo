@@ -24,12 +24,25 @@ def _blocks(parts, variant):
     for p in parts:
         b = []
         if variant == "iki":
-            tr, osm = _paras(p["tr"]), _paras(p["osm"])
-            if len(tr) == len(osm):
-                for a, o in zip(tr, osm):
-                    b += [("tr", a), ("osm", o)]
+            # Satırlar KONUMLARIYLA eşleştirilir (boş satırlar atılmadan): Osmanlıca tarafında boş kalan
+            # bir satır (ör. "-----" süs satırının karşılığı) eşleşmeyi kaydırmasın.
+            tl, ol = (p["tr"] or "").split("\n"), (p["osm"] or "").split("\n")
+            if len(tl) == len(ol):
+                for a, o in zip(tl, ol):
+                    a, o = a.strip(), o.strip()
+                    if not any(ch.isalnum() for ch in a) and not o:
+                        continue  # boş ya da süs satırı
+                    if a:
+                        b.append(("tr", a))
+                    if o:
+                        b.append(("osm", o))
             else:
-                b += [("tr", a) for a in tr] + [("osm", o) for o in osm]
+                tr, osm = _paras(p["tr"]), _paras(p["osm"])
+                if len(tr) == len(osm):
+                    for a, o in zip(tr, osm):
+                        b += [("tr", a), ("osm", o)]
+                else:
+                    b += [("tr", a) for a in tr] + [("osm", o) for o in osm]
         elif variant == "osm":
             b = [("osm", o) for o in _paras(p["osm"])]
         else:

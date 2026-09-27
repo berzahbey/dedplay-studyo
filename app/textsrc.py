@@ -383,6 +383,25 @@ def _dipnotlari_duzenle(paras):
     return out
 
 
+# ================= Metin katmanı kalite kontrolü =================
+# Bazı taranmış PDF'lerin içinde eski/bozuk bir OCR katmanı olur: Türkçe harfler (ı ş ğ İ Ş Ğ) kaybolmuş,
+# kelimelerin içinde ^ $ * gibi çöp işaretler vardır. Böyle bir katman yok sayılır, sayfalar yeniden OCR'lanır.
+_TR_KELIME = {"ve", "bir", "bu", "ile", "da", "de", "ki", "gibi", "olan", "için", "daha", "çok", "olarak", "ise"}
+_TR_OZEL = set("ığşİŞĞ")
+_COP = re.compile(r"[\^$*|<>~{}\\]|[a-zçöü]\d[a-zçöü]", re.I)
+
+
+def katman_bozuk_mu(metin: str) -> bool:
+    harfler = [c for c in metin if c.isalpha()]
+    kelimeler = re.findall(r"[^\W\d_]+", metin.lower())
+    if len(harfler) < 800 or not kelimeler:
+        return False
+    turkce = sum(1 for w in kelimeler if w in _TR_KELIME) / len(kelimeler) > 0.03
+    ozel_oran = sum(1 for c in harfler if c in _TR_OZEL) / len(harfler)
+    cop_oran = len(_COP.findall(metin)) / max(1, len(kelimeler))
+    return (turkce and ozel_oran < 0.015) or cop_oran > 0.03
+
+
 def pdf_temiz(path):
     """PDF -> (ana_paragraflar, dipnotlar): ön/son sayfalar, içindekiler, üst bilgiler ve dipnotlar ayrılır."""
     import fitz
@@ -397,6 +416,11 @@ def pdf_temiz(path):
             ocr.append(i)
         else:
             sayfalar[i], notlar[i] = ana, dip
+    # Bozuk metin katmanı (eski OCR: ı/ş/ğ kaybolmuş, çöp işaretler) varsa yok say, bütün sayfaları OCR'la
+    katman = "\n".join(p for s in sayfalar if s for p in s)
+    if katman_bozuk_mu(katman):
+        print(f"[metin] {os.path.basename(path)}: PDF'in metin katmanı bozuk, bütün sayfalar yeniden OCR'lanacak", flush=True)
+        sayfalar, notlar, ocr = [None] * len(doc), [None] * len(doc), list(range(len(doc)))
     if ocr:
         workers = max(1, os.cpu_count() or 1)
         with ProcessPoolExecutor(max_workers=workers) as ex:

@@ -101,6 +101,8 @@ class Worker(threading.Thread):
             lang = j["lang"]
             if lang == "auto":
                 lang = detect_lang(sample_text(src))
+                if lang is None and src.lower().endswith(".pdf"):
+                    lang = _ocr_ile_dil(src)  # taranmış PDF: birkaç sayfayı OCR'layıp dili oradan anla
                 if lang is None:
                     raise RuntimeError("Kitabın dili algılanamadı (taranmış bir kitap olabilir). "
                                        "Silip 'Kitap dili' seçeneğini elle belirleyerek yeniden ekleyin.")
@@ -258,6 +260,28 @@ def _original_parts(j):
 
 
 Worker.original_parts = staticmethod(_original_parts)
+
+
+def _ocr_ile_dil(path):
+    """Metin katmanı olmayan PDF'te kitabın içinden 3 sayfayı OCR'layıp dili algılar.
+    Emin olunamazsa (yeterince tanıdık kelime yoksa) None döner."""
+    try:
+        import fitz
+        from .detect import WORDS
+        n = len(fitz.open(path))
+        sayfalar = sorted({max(0, min(n - 1, k)) for k in (4, 9, 14)})
+        text = ""
+        for i in sayfalar:
+            _, items = textsrc._ocr_page((path, i))
+            text += " ".join(t for t, _ in items) + "\n"
+        lang = detect_lang(text)
+        kelimeler = re.findall(r"[^\W\d_]+", text.lower())
+        if lang in WORDS and sum(1 for w in kelimeler if w in WORDS[lang]) >= 8:
+            print(f"[dil] {os.path.basename(path)}: OCR ile '{lang}' algılandı", flush=True)
+            return lang
+    except Exception:
+        traceback.print_exc()
+    return None
 
 
 def save_outputs(job_id):

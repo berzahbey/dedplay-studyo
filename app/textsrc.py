@@ -185,8 +185,10 @@ def to_parts(paras, size=PART_CHARS):
 import statistics as _st
 
 ICERIK_BASLIK = re.compile(
-    r"^(çevirenin|mütercimin|müellifin|yazarın|naşirin|editörün|yayıncının)?\s*(önsözü|ön sözü)[.:]?$|"
-    r"^(önsöz|ön söz|giriş|mukaddime|takdim|sunuş|başlarken|takriz|introduction|preface|foreword)[.:]?$|"
+    r"^((çevirenin|mütercimin|müterciminin|müellifin|yazarın|naşirin|neşredenin|hazırlayanın|tercüme edenin|"
+    r"sadeleştirenin|editörün|yayıncının)\s+)?(önsözü|ön sözü|mukaddimesi|takdimi|sunuşu)[.:]?$|"
+    r"^(önsöz|ön söz|giriş|mukaddime|takdim|sunuş|başlarken|takriz|tanıtım|kitap hakkında|"
+    r"introduction|preface|foreword)(\s+yerine)?[.:]?$|"
     r"^(birinci|1\.?)\s*(bölüm|kısım|fasıl|kitap)[.:]?$|^(bölüm|kısım)\s*(1|i|bir)[.:]?$", re.I)
 KUNYE = re.compile(r"isbn|sertifika|basımevi|matbaa|baskı\b|\bbasım\b|yayın(ları|evi)|hakları saklı|©|copyright|"
                    r"tel\s*[:.]|faks|fax|www\.|e-?posta|kapak tasarım|dizgi|editör|yayın yönetmen|genel yayın|"

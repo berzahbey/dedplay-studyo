@@ -14,6 +14,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
+ADD https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/tr/tr_50k.txt /app/app/data/tr_kelime.txt
 RUN python app/make_icon.py
 
 EXPOSE 8000

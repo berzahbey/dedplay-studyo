@@ -17,7 +17,7 @@ import traceback
 
 import requests
 
-from . import clients, db, textsrc
+from . import clients, db, textsrc, duzelt
 from .detect import detect_lang, sample_text
 
 TEXT_DIR = os.environ.get("OKUMA_TEXT_DIR", "/okuma-text")
@@ -283,6 +283,7 @@ def _original_parts(j):
                 return []
             paras = textsrc.paragraflari_bastan_temizle(
                 textsrc.from_txt_bytes(clients.tr_text(j["tr_job"]), skip_title=True))
+        paras = duzelt.duzelt(paras)  # satır içi üst bilgiler, bölünmüş kelimeler, çöp işaretler, sayfa atıfları
         if sum(len(p) for p in paras) < 50:
             return []
         return textsrc.parts_with_notes(paras, notes)

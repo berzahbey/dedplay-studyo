@@ -10,3 +10,4 @@ weasyprint==63.1
 pillow==11.0.0
 mutagen==1.47.0
 pytesseract==0.3.13
+zeyrek==0.1.3

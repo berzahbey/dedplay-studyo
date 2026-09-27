@@ -46,7 +46,8 @@ def parts_to_epub(parts, title, out_path):
     bolumler = []
     for i, p in enumerate(parts, 1):
         ch = epub.EpubHtml(title=f"{i}", file_name=f"b{i:04d}.xhtml", lang="tr")
-        ch.content = "<html><body>" + "".join(f"<p>{_html.escape(x)}</p>" for x in p["tr"].split("\n") if x.strip()) + "</body></html>"
+        satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for x in p["tr"].split("\n")]  # ayet/madde no okunmaz
+        ch.content = "<html><body>" + "".join(f"<p>{_html.escape(x)}</p>" for x in satirlar if x.strip()) + "</body></html>"
         book.add_item(ch)
         bolumler.append(ch)
     book.add_item(epub.EpubNcx())

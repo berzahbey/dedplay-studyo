@@ -29,9 +29,14 @@ _SAPKA = str.maketrans("âîûÂÎÛ", "aiuAIU")
 _BAGLAC = {"ve", "de", "da", "ki", "mi", "mı", "mu", "mü", "bir", "bu", "şu", "o", "ya", "ile"}
 
 
+def _kucuk(w):
+    """Türkçeye uygun küçültme: İ -> i, I -> ı (Python'un lower()'ı İ'yi 'i + nokta' yapar)."""
+    return w.replace("İ", "i").replace("I", "ı").lower()
+
+
 def _kelime_mi(w):
     k = _sozluk()[0]
-    w = w.lower()
+    w = _kucuk(w)
     return w in k or w.translate(_SAPKA) in k
 
 
@@ -152,10 +157,116 @@ def duzelt(paras):
         p = satir_ici_tireleri_birlestir(p)
         p = sayfa_atiflarini_sil(p)
         p = dipnot_isaretlerini_sil(p)
+        p = harfleri_onar(p)
         p = re.sub(r"\s{2,}", " ", p).replace(" ,", ",").replace(" .", ".").strip()
         p = re.sub(r"\s*[;,:]+\s*(?=[.!?])", "", p)          # atıf silinince kalan ";." -> "."
         p = re.sub(r"([,;:])(\s*\1)+", r"\1", p)               # ", ," -> ","
         p = re.sub(r"\(\s*\)|\[\s*\]", "", p).strip()        # boş parantez
-        if p and not re.fullmatch(r"[\d\s\W]{1,6}", p):  # tek başına sayfa numarası / işaret
+        p = re.sub(r"^(\d{1,3}[.)])(?=[^\s\d.)])", r"\1 ", p)  # "285.Resul" -> "285. Resul"
+        if p and not re.fullmatch(r"[\d\s\W]{1,6}", p) and not cop_paragraf_mi(p):  # sayfa no / çöp paragraf
             out.append(p)
     return out
+
+
+# ================= Türkçe harf onarımı ve çöp paragraflar (Zemberek biçimbilim çözümleyicisi) =================
+# OCR'ın sık karıştırdığı harfler: û->ü (nûr -> nür), ı<->i, ğ<->g, ş<->s, ç<->c, ö<->o. Bir kelime ancak
+# çözümleyiciye göre GEÇERSİZSE ve harf değişimiyle GEÇERLİ bir hâli bulunursa düzeltilir (kul, haşir, işitir korunur).
+import itertools
+import logging
+
+_cozumleyici = False
+_gecerli_onbellek = {}
+# Sadece OCR'ın hata yaptığı yönde: şapkalı û'yü ü okur (nûr -> nür), çengel/kuyruk/noktaları kaçırır (g/s/c/o).
+# Ters yön (ş -> s) ve ı/i değişimi yasak: oluşuna, itikadî, fıkhî, Hâlık bozulmasın.
+_KARISAN = {"ü": "u", "g": "ğ", "s": "ş", "c": "ç", "o": "ö"}
+
+
+def _an():
+    global _cozumleyici
+    if _cozumleyici is False:
+        try:
+            logging.disable(logging.CRITICAL)
+            import zeyrek
+            _cozumleyici = zeyrek.MorphAnalyzer()
+        except Exception:
+            _cozumleyici = None
+        finally:
+            logging.disable(logging.NOTSET)
+    return _cozumleyici
+
+
+def gecerli_mi(w):
+    w = _kucuk(w)
+    if w in _gecerli_onbellek:
+        return _gecerli_onbellek[w]
+    an = _an()
+    if an is None:
+        return True
+    logging.disable(logging.CRITICAL)
+    try:
+        sonuc = len(an._parse(w)) > 0
+    except Exception:
+        sonuc = True
+    finally:
+        logging.disable(logging.NOTSET)
+    _gecerli_onbellek[w] = sonuc
+    return sonuc
+
+
+def _aday(w):
+    """Geçersiz kelime için harf değişimleriyle geçerli bir hâl (en çok 3 konum); birden çok varsa en sık olanı."""
+    konumlar = [i for i, c in enumerate(w) if c in _KARISAN][:8]
+    adaylar = []
+    for n in (1, 2, 3):
+        for secim in itertools.combinations(konumlar, n):
+            k = list(w)
+            for i in secim:
+                k[i] = _KARISAN[k[i]]
+            a = "".join(k)
+            if gecerli_mi(a):
+                adaylar.append(a)
+        if adaylar:
+            break
+    if not adaylar:
+        return None
+    kelimeler = _sozluk()[0]
+    adaylar.sort(key=lambda a: kelimeler.get(a, 10 ** 9))
+    if len(adaylar) > 1 and adaylar[0] not in kelimeler:
+        return None  # birden çok geçerli hâl var ve hiçbiri bilinen kelime değil: belirsiz, dokunma
+    return adaylar[0]
+
+
+_KELIME_RE = re.compile(r"[^\W\d_]{2,}")
+
+
+def harfleri_onar(p):
+    if _an() is None:
+        return p
+    def degis(m):
+        w = m.group(0)
+        if (w.isupper() and len(w) > 1) or len(w) < 3:  # BÜYÜK HARFLİ başlıklar ve kısa parçalar: dokunma
+            return w
+        wl = _kucuk(w)
+        if gecerli_mi(wl) or _kelime_mi(wl):
+            return w
+        a = _aday(wl)
+        if not a:
+            return w
+        return (a[0].upper() + a[1:]) if w[0].isupper() else a
+    return _KELIME_RE.sub(degis, p)
+
+
+def cop_paragraf_mi(p):
+    """Arka kapak / bozuk tarama artığı: kısa ve kelimelerinin çoğu geçersiz paragraflar."""
+    if _an() is None or len(p) > 200:
+        return False
+    ws = _KELIME_RE.findall(p)
+    if not ws:
+        return True
+    iyi = sum(1 for w in ws if gecerli_mi(w) or _kelime_mi(w))
+    if iyi / len(ws) >= 0.5:
+        return False
+    # gerçekten çöp gibi mi: kısa parçalar ya da bol işaret (» # © $ | <) -- geçerli ama nadir kelimeli cümleler kalır
+    ort = sum(len(w) for w in ws) / len(ws)
+    isaret = len(re.findall(r"[»«#©$|<>*@~^]", p)) / max(1, len(p))
+    return ort < 4 or isaret > 0.03

@@ -304,7 +304,8 @@ def _ocr_sayfa_temiz(args):
         ws = sorted(satirlar[key])
         hs = [h for _, t, h, _ in ws if any(c.isalpha() for c in t)]
         lh = _st.median(hs) if hs else 0
-        metin = " ".join(t for _, t, h, _ in ws if not (lh and h < lh * 0.6 and re.fullmatch(r"[\d\W]+", t)))
+        metin = " ".join(t for k, (_, t, h, _) in enumerate(ws)
+                         if not (k > 0 and lh and h < lh * 0.6 and re.fullmatch(r"[\d\W]+", t)))
         rows.append({"key": key[:2], "text": metin, "h": lh, "top": min(w[3] for w in ws), "n": len(ws)})
     ana, dip = _dipnot_ayir(rows, img.size[1])
     temiz = lambda rs: [(r["key"], r["text"]) for r in rs if not PAGE_NUM.match(r["text"].strip())]
@@ -321,12 +322,13 @@ def _katman_sayfa_temiz(page):
                 continue
             boy = [s["size"] for s in spans if any(c.isalpha() for c in s["text"])]
             h = _st.median(boy) if boy else 0
-            metin = "".join(s["text"] for s in spans
-                            if not ((s.get("flags", 0) & 1 or (h and s["size"] < h * 0.75))
+            metin = "".join(s["text"] for k, s in enumerate(spans)
+                            if not (k > 0 and (s.get("flags", 0) & 1 or (h and s["size"] < h * 0.75))
                                     and re.fullmatch(r"[\d\s\W]+", s["text"])))
             rows.append({"key": id(b), "text": metin, "h": h, "top": ln["bbox"][1], "n": len(metin.split())})
     ana, dip = _dipnot_ayir(rows, page.rect.height)
-    temiz = lambda rs: [(r["key"], r["text"]) for r in rs if not re.fullmatch(r"[\d\s\W]{0,4}", r["text"])]
+    temiz = lambda rs: [(r["key"], r["text"]) for r in rs
+                        if not re.fullmatch(r"[\d\s\W]{0,4}", r["text"]) or _NUMARA.fullmatch(r["text"].strip())]
     return _paragraflar(temiz(ana)), _paragraflar(temiz(dip))
 
 
@@ -402,6 +404,23 @@ def katman_bozuk_mu(metin: str) -> bool:
     return (turkce and ozel_oran < 0.015) or cop_oran > 0.03
 
 
+_NUMARA = re.compile(r"\d{1,3}\s*[.)]")
+
+
+def _numaralari_bagla(paras):
+    """Tek başına kalmış ayet/madde numarası ("1.", "2)") sonraki paragrafın başına eklenir."""
+    out, bekleyen = [], None
+    for p in paras:
+        if _NUMARA.fullmatch(p.strip()):
+            bekleyen = p.strip()
+            continue
+        out.append(f"{bekleyen} {p}" if bekleyen else p)
+        bekleyen = None
+    if bekleyen:
+        out.append(bekleyen)
+    return out
+
+
 def pdf_temiz(path):
     """PDF -> (ana_paragraflar, dipnotlar): ön/son sayfalar, içindekiler, üst bilgiler ve dipnotlar ayrılır."""
     import fitz
@@ -431,7 +450,7 @@ def pdf_temiz(path):
     tut = on_ve_son_sayfalari_at([[str(i)] + (sayfalar[i] or []) for i in idx])
     kalan = [int(s[0]) for s in tut]
     sayfalar = _tekrarlayan_basliklari_at([sayfalar[i] or [] for i in kalan])
-    ana = _birlestir([_YAPISIK_RAKAM.sub("", p) for s in sayfalar for p in s if not PAGE_NUM.match(p)])
+    ana = _birlestir(_numaralari_bagla([_YAPISIK_RAKAM.sub("", p) for s in sayfalar for p in s if not PAGE_NUM.match(p)]))
     dip = _dipnotlari_duzenle([p for i in kalan for p in (notlar[i] or [])])
     return ana, dip
 

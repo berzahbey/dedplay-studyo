@@ -35,6 +35,27 @@ def ok_filename(j):
     return j["book_name"] + ".epub"
 
 
+def parts_to_epub(parts, title, out_path):
+    """Temiz metin parçalarından EPUB: her parça ayrı bölüm (Kitap Okuma her bölümü bir ses parçası yapar)."""
+    import html as _html
+    from ebooklib import epub
+    book = epub.EpubBook()
+    book.set_identifier(f"dedplay-{abs(hash(title))}")
+    book.set_title(title)
+    book.set_language("tr")
+    bolumler = []
+    for i, p in enumerate(parts, 1):
+        ch = epub.EpubHtml(title=f"{i}", file_name=f"b{i:04d}.xhtml", lang="tr")
+        ch.content = "<html><body>" + "".join(f"<p>{_html.escape(x)}</p>" for x in p["tr"].split("\n") if x.strip()) + "</body></html>"
+        book.add_item(ch)
+        bolumler.append(ch)
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    book.spine = bolumler
+    epub.write_epub(out_path, book)
+    return out_path
+
+
 def txt_to_epub(txt_path, title, out_path):
     """Kitap Okuma sadece PDF/EPUB kabul ettiği için düz metni basit bir EPUB'a çevirir."""
     import html as _html
@@ -163,6 +184,15 @@ class Worker(threading.Thread):
         if state == "bitti":
             return
         if state == "bekliyor":
+            # Seslendirme de Stüdyo'nun temiz metninden yapılır (ön sayfalar, içindekiler ve dipnotlar hariç).
+            ana = [p for p in db.all_parts(jid) if p["name"].startswith("Parca_")]
+            if not ana and jid not in self.no_orig and j["osm_state"] == "bekliyor":
+                return  # temiz metin henüz hazırlanıyor
+            if ana:
+                path = parts_to_epub(ana, name, os.path.join(db.job_dir(jid), name + ".epub"))
+                clients.ok_submit(path, name + ".epub")
+                db.update(jid, ok_state="sirada")
+                return
             if j["lang"] == "tr":
                 path, filename = src, name + os.path.splitext(j["filename"])[1].lower()
                 if filename.endswith(".txt"):  # yapıştırılan metin: Kitap Okuma için EPUB'a çevir
@@ -245,15 +275,17 @@ class Worker(threading.Thread):
 
 def _original_parts(j):
     try:
+        notes = []
         if j["lang"] == "tr":
-            paras = textsrc.extract(db.source_path(j["id"], j["filename"]))
+            paras, notes = textsrc.extract_full(db.source_path(j["id"], j["filename"]))
         else:
             if not j["tr_job"]:
                 return []
-            paras = textsrc.from_txt_bytes(clients.tr_text(j["tr_job"]), skip_title=True)
+            paras = textsrc.paragraflari_bastan_temizle(
+                textsrc.from_txt_bytes(clients.tr_text(j["tr_job"]), skip_title=True))
         if sum(len(p) for p in paras) < 50:
             return []
-        return textsrc.to_parts(paras)
+        return textsrc.parts_with_notes(paras, notes)
     except Exception:
         traceback.print_exc()
         return []
@@ -323,7 +355,8 @@ def save_outputs(job_id):
             clients.tr_download(j["tr_job"], fmt, os.path.join(
                 folder, subdir[fmt], f"{j['title']} - Çeviri ve aslı.{fmt}".replace("/", "-")), 1)
     # MP3 parçaları: kitap adıyla, ek yer kaplamadan (aynı dosyaya ikinci ad = sabit bağlantı)
-    mp3s = sorted(glob.glob(os.path.join(glob.escape(folder), "Parca_*.mp3")), key=_natural)
+    mp3s = sorted(glob.glob(os.path.join(glob.escape(folder), "Parca_*.mp3")) +
+                  glob.glob(os.path.join(glob.escape(folder), "Bolum_*.mp3")), key=_natural)
     if mp3s:
         mdir = os.path.join(folder, "MP3")
         shutil.rmtree(mdir, ignore_errors=True)

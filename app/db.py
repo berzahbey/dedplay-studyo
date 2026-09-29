@@ -111,6 +111,14 @@ def reset_osm(job_id):
                   "stage='produce', error=NULL, note=NULL WHERE id=?", (job_id,))
 
 
+def insert_parts_hazir(job_id, items):
+    """Dedplay Kütüphane'den gelen parçalar: Türkçe ve Osmanlıca birlikte (Osmanlıca adımı atlanır)."""
+    with conn() as c:
+        c.execute("DELETE FROM parts WHERE job_id=?", (job_id,))
+        c.executemany("INSERT INTO parts(job_id,idx,name,tr,osm) VALUES(?,?,?,?,?)",
+                      [(job_id, i, n, t, o) for i, (n, t, o) in enumerate(items)])
+
+
 def pending_parts(job_id):
     return q("SELECT * FROM parts WHERE job_id=? AND osm IS NULL ORDER BY idx", (job_id,))
 

@@ -143,6 +143,39 @@ def job_from_text(t: PastedText):
     return {"id": jid}
 
 
+class KutuphaneParca(BaseModel):
+    name: str
+    tr: str
+    osm: str = ""
+
+
+class KutuphaneKitap(BaseModel):
+    title: str
+    osm_title: str = ""
+    parts: list[KutuphaneParca]
+
+
+@app.post("/api/jobs/from-kutuphane")
+def job_from_kutuphane(k: KutuphaneKitap):
+    """Dedplay Kütüphane'de hazırlanmış (düzeltilmiş) kitap: parçalar Türkçe + Osmanlıca hazır gelir."""
+    import re as _re
+    from .worker import parts_to_epub
+    ana = [p for p in k.parts if p.name.startswith("Parca_") and p.tr.strip()]
+    if not ana:
+        raise HTTPException(400, "Kitapta metin parçası yok.")
+    title = _re.sub("[" + _re.escape(chr(92) + "/:*?" + chr(34) + "<>|") + "]+", " ", k.title or "")
+    title = _re.sub(r"\s+", " ", title).strip(" .")[:80] or "Kütüphane kitabı"
+    name = title + ".epub"
+    jid = db.create_job(name, "tr")
+    db.insert_parts_hazir(jid, [(p.name, p.tr, p.osm or "") for p in k.parts])
+    parts_to_epub([{"tr": p.tr} for p in ana], title, db.source_path(jid, name))  # kaynak: seslendirme metni
+    n = len(k.parts)
+    db.update(jid, title=title, lang="tr", tr_state="atlandi", stage="produce", book_name=title, auto_title=2,
+              osm_state="bitti", osm_done=n, osm_total=n, osm_title=(k.osm_title or "").strip() or None,
+              note="Dedplay Kütüphane'den geldi", status="active")
+    return {"id": jid}
+
+
 @app.post("/api/jobs/{job_id}/resume")
 def resume_job(job_id: int):
     resume(job_id)

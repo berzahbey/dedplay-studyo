@@ -167,11 +167,16 @@ def job_from_kutuphane(k: KutuphaneKitap):
     title = _re.sub(r"\s+", " ", title).strip(" .")[:80] or "Kütüphane kitabı"
     name = title + ".epub"
     jid = db.create_job(name, "tr")
-    db.insert_parts_hazir(jid, [(p.name, p.tr, p.osm or "") for p in k.parts])
+    hazir_osm = any(p.osm.strip() for p in k.parts)  # Osmanlıca gelmediyse Stüdyo kendisi çevirir
+    if hazir_osm:
+        db.insert_parts_hazir(jid, [(p.name, p.tr, p.osm or "") for p in k.parts])
+    else:
+        db.insert_parts(jid, [(p.name, p.tr) for p in k.parts])
     parts_to_epub([{"tr": p.tr} for p in ana], title, db.source_path(jid, name))  # kaynak: seslendirme metni
     n = len(k.parts)
     db.update(jid, title=title, lang="tr", tr_state="atlandi", stage="produce", book_name=title, auto_title=2,
-              osm_state="bitti", osm_done=n, osm_total=n, osm_title=(k.osm_title or "").strip() or None,
+              osm_state="bitti" if hazir_osm else "calisiyor", osm_done=n if hazir_osm else 0, osm_total=n,
+              osm_title=(k.osm_title or "").strip() or None,
               note="Dedplay Kütüphane'den geldi", status="active")
     return {"id": jid}
 

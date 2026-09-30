@@ -155,6 +155,7 @@ def duzelt(paras):
         p = satir_ici_ust_bilgileri_sil(p, basliklar)
         p = cop_isaretleri_sil(p)
         p = satir_ici_tireleri_birlestir(p)
+        p = bolunmus_kelimeleri_birlestir(p)
         p = sayfa_atiflarini_sil(p)
         p = dipnot_isaretlerini_sil(p)
         p = harfleri_onar(p)
@@ -270,3 +271,48 @@ def cop_paragraf_mi(p):
     ort = sum(len(w) for w in ws) / len(ws)
     isaret = len(re.findall(r"[»«#©$|<>*@~^]", p)) / max(1, len(p))
     return ort < 4 or isaret > 0.03
+
+
+_OZEL_BAS = "ıİğĞşŞçÇöÖüÜ"
+
+
+def _gecerli_kelime(w):
+    k = _kucuk(w)
+    kelimeler, _ = _sozluk()
+    return k in kelimeler or gecerli_mi(k)
+
+
+def _harf(w):
+    return re.sub(r"[^\w]", "", w)
+
+
+def bolunmus_kelimeleri_birlestir(p):
+    """Türkçe harfin (ı, ğ, ş, ç, ö, ü) önüne boşluk girmişse birleştirir: "oldu ğundan" -> "olduğundan".
+    Birleşik hâl geçerli olmalı; sağ parça ek gibiyse (en çok 3 harf ya da ı/ğ ile başlıyor) birleşir, değilse
+    parçalardan biri tek başına kelime olmamalı ("bu şekilde", "ve ölçü" gibi iki gerçek kelimeye dokunulmaz)."""
+    if _an() is None or not any(c in p for c in _OZEL_BAS):
+        return p
+    parcalar = re.split(r"( )", p)
+    out = []
+    i = 0
+    while i < len(parcalar):
+        w = parcalar[i]
+        while i + 2 < len(parcalar) and parcalar[i + 1] == " ":
+            sag = parcalar[i + 2]
+            sol_h, sag_h = _harf(w), _harf(sag)
+            if not sol_h or not sag_h or sag[0] not in _OZEL_BAS or not w[-1:].isalpha():
+                break
+            sag_kelime = re.match(r"[^\W\d_]+", sag)
+            if not sag_kelime:
+                break
+            birlesik = sol_h + sag_kelime.group(0)
+            ek_gibi = len(sag_kelime.group(0)) <= 3 or sag[0] in "ığ"
+            if not _gecerli_kelime(birlesik):
+                break
+            if not ek_gibi and _gecerli_kelime(sol_h) and _gecerli_kelime(sag_kelime.group(0)):
+                break
+            w = w + sag
+            i += 2
+        out.append(w)
+        i += 1
+    return "".join(out)

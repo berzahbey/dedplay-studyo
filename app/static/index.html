@@ -128,15 +128,12 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
       <label class="f">Kitap dili
         <select id="lang">
           <option value="auto">Otomatik algıla</option>
-          <option value="tr">Türkçe (çeviri yapılmaz)</option>
-          <option value="ar">Arapça</option>
-          <option value="en">İngilizce</option>
-          <option value="fr">Fransızca</option>
+          <option value="tr">Türkçe</option>
         </select>
       </label>
       <button class="primary" type="submit" id="send">Stüdyoya ekle</button>
     </div>
-    <p class="hint">EPUB, PDF, DOCX ve TXT. Türkçe olmayan kitaplar önce çevrilir; çeviri bitince seslendirme ve Osmanlıca aynı anda başlar.</p>
+    <p class="hint">EPUB, PDF, DOCX ve TXT. Yalnız Türkçe kitaplar: seslendirme ve Osmanlıca aynı anda başlar.</p>
   </form>
 
   <h2>Kitaplar</h2>
@@ -159,7 +156,7 @@ async function api(path, opts) {
 async function loadServices() {
   try {
     const s = await api("/api/services");
-    const names = { translate: "Translate", okuma: "Kitap Okuma", osmanlica: "Osmanlıca çevirici" };
+    const names = { okuma: "Kitap Okuma", osmanlica: "Osmanlıca çevirici" };
     $("services").innerHTML = Object.entries(names).map(([k, n]) =>
       `<span><i class="dot ${s[k] ? "ok" : "bad"}"></i>${n}${s[k] ? "" : " (ulaşılamıyor)"}</span>`).join("");
   } catch { $("services").textContent = "Stüdyo sunucusuna ulaşılamıyor"; }
@@ -182,18 +179,12 @@ function links(id, variant, label, partial) {
 }
 
 function jobHTML(j) {
-  const translating = j.stage === "translate";
-  const tr = j.lang === "tr" ? stage("Çeviri", "atlandi", 0, 0, { atlandi: "Kitap Türkçe, çeviri gerekmedi" }, true)
-    : stage("Çeviri", j.tr_state, j.tr_done, j.tr_total, {
-        bekliyor: "Dil belirleniyor", sirada: "Translate'te sırada",
-        calisiyor: (d, t) => t ? `${d} / ${t} paragraf, %${pct(d, t)}` : "Metin çıkarılıyor",
-        duraklatildi: "Translate'te duraklatıldı", hata: "Çeviri durdu", bitti: `Tamamlandı (${j.tr_total} paragraf)` });
   const ok = stage("Seslendirme", j.ok_state, j.ok_done, j.ok_total, {
-    bekliyor: translating ? "Çeviri bitince başlayacak" : "Başlıyor", sirada: "Kitap Okuma'da sırada",
+    bekliyor: "Başlıyor", sirada: "Kitap Okuma'da sırada",
     calisiyor: (d, t) => t ? `Bölüm ${d} / ${t}, %${pct(d, t)}` : "Hazırlanıyor",
     hata: "Seslendirme hata verdi", bitti: "Sesli kitap hazır" });
   const osm = stage("Osmanlıca", j.osm_state, j.osm_done, j.osm_total, {
-    bekliyor: translating ? "Çeviri bitince başlayacak" : "Temiz metin parçaları bekleniyor",
+    bekliyor: "Temiz metin parçaları bekleniyor",
     calisiyor: (d, t) => `${d} / ${t} parça, %${pct(d, t)}`, hata: "Osmanlıca çeviri durdu", bitti: "Osmanlıca metin hazır" });
 
   const stateTxt = j.status === "done" ? "Tamamlandı" : j.status === "error" ? "Durdu" : "Çalışıyor";
@@ -209,15 +200,12 @@ function jobHTML(j) {
     const partial = j.osm_state !== "bitti";
     dl += links(j.id, "osm", "Osmanlıca", partial) + links(j.id, "iki", "Türkçe + Osmanlıca", partial);
   }
-  if (j.tr_job && j.tr_state === "bitti")
-    dl += `<div class="dl-row"><b>Çeviri, aslıyla birlikte</b>` + [["epub","EPUB"],["pdf","PDF"],["docx","Word"]].map(([f, n]) =>
-      `<a href="/api/jobs/${j.id}/translation?fmt=${f}&bilingual=1">${n}</a>`).join("") + `</div>`;
 
-  const canResume = j.status === "error" || [j.tr_state, j.ok_state, j.osm_state].some(s => s === "hata" || s === "duraklatildi");
+  const canResume = j.status === "error" || [j.ok_state, j.osm_state].some(s => s === "hata" || s === "duraklatildi");
   return `<li class="job" data-id="${j.id}">
     <div class="job-head"><p class="job-title">${esc(j.title)}</p>
       <span class="state ${j.status}">${stateTxt} · ${esc(LANG[j.lang] || j.lang)}</span></div>
-    <div class="stages">${tr}${ok}${osm}</div>
+    <div class="stages">${ok}${osm}</div>
     ${j.error ? `<p class="msg err">${esc(j.error)}</p>` : ""}
     ${j.note ? `<p class="msg note">${esc(j.note)}</p>` : ""}
     ${j.saved ? `<p class="msg ok">Bütün dosyalar çıktı klasöründe "${esc(j.saved)}" klasörüne kaydedildi.</p>` : ""}
@@ -244,7 +232,7 @@ $("jobs").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-a]"); if (!b) return;
   const id = b.closest(".job").dataset.id;
   if (b.dataset.a === "del") {
-    if (!confirm("Bu kitap Stüdyo listesinden silinsin mi? (Translate ve Kitap Okuma'daki kayıtlar ile sesli kitap silinmez.)")) return;
+    if (!confirm("Bu kitap Stüdyo listesinden silinsin mi? (Kitap Okuma'daki kayıt ve sesli kitap silinmez.)")) return;
     await api(`/api/jobs/${id}`, { method: "DELETE" });
   } else if (b.dataset.a === "redo") {
     if (!confirm("Osmanlıca metin güncel sözlükle yeniden çevrilsin mi? Seslendirmeye dokunulmaz; bitince dosyalar çıktı klasörüne yeniden kaydedilir.")) return;

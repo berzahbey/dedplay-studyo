@@ -249,8 +249,6 @@ $("#yukleBtn").onclick = async () => {
 const arapHarfli = s => /[\u0600-\u06FF]/.test(s || "");
 const sureYaz = sn => { const sa = Math.floor(sn / 3600), dk = Math.round((sn % 3600) / 60); return sa ? `${sa} sa ${dk} dk` : `${Math.max(1, dk)} dk`; };
 function asamaYazisi(k) {
-  if (k.ceviri?.durum === "calisiyor") return E("span", { class: "asama" }, `Türkçeye çevriliyor: %${Math.floor(100 * (k.ceviri.yapilan || 0) / (k.ceviri.toplam || 1))}` +
-    (k.ceviri.kalan_sn ? `, kalan ~${sureYaz(k.ceviri.kalan_sn)}` : ""));
   if (k.asama === "hazır") return E("span", { class: "asama hazir" }, `Hazır, ${(k.epublar || []).length} EPUB`);
   if (k.asama === "hata") return E("span", { class: "asama hata" }, "Hata: " + (k.hata || ""));
   return E("span", { class: "asama" }, k.asama || "…");
@@ -278,8 +276,7 @@ async function kitaplar() {
     if (k.kimlik === acik) ayrinti(k.kimlik, li);
   }
   const suruyor = liste.some(k => !["hazır", "hata"].includes(k.asama));
-  const ceviriSuruyor = liste.some(k => k.ceviri?.durum === "calisiyor");
-  clearTimeout(yoklama); if (suruyor || ceviriSuruyor) yoklama = setTimeout(kitaplar, suruyor ? 3000 : 30000);
+  clearTimeout(yoklama); if (suruyor) yoklama = setTimeout(kitaplar, 3000);
 }
 async function ayrinti(kid, li) {
   const kutu = E("div", { class: "ayrinti" }, "Yükleniyor…"); li.append(kutu);
@@ -318,51 +315,15 @@ async function ayrinti(kid, li) {
   if (d.durum.cikti?.length) epKutu.append(E("p", { class: "meta" }, E("span", {}, "Kitaplar klasöründe: " + d.durum.cikti.join(", "))));
   else if (d.durum.cikti_uyari) epKutu.append(E("p", { class: "uyari" }, d.durum.cikti_uyari));
   kutu.append(epKutu);
-  if (false) {  // 0.5.8: çeviri kaldırıldı
-    const c = d.durum.ceviri || {}, eksik = d.ceviri_eksik || { paragraf: 0 };
-    const cb = E("div", {}, E("h3", {}, "Türkçe çeviri"));
-    const cevirBtn = (sonraStudyo, yazi) => {
-      const b = E("button", { class: "btn" + (sonraStudyo ? "" : " ghost"), type: "button" }, yazi);
-      b.onclick = async () => {
-        if (!d.kunye.baslik.tr && !confirm("Türkçe eser adı boş: dosya adları ve Stüdyo'daki klasör Arapça adla açılacak. " +
-            "Önce yukarıdaki künyeye Türkçe adı (ör. el-Munkız mine'd-Dalâl) yazıp kaydetmen önerilir.\n\nYine de devam edilsin mi?")) return;
-        if (!confirm(`${eksik.paragraf} paragraf ${eksik.model} ile Türkçeye çevrilecek. Tahmini süre: ~${sureYaz(eksik.tahmini_sn)}.` +
-            "\n\nBitince Türkçe, Osmanlıca ve Türkçe-Osmanlıca EPUB'lar oluşur; okuyup düzelttikten sonra Stüdyo'ya gönderebilirsin. Başlasın mı?")) return;
-        b.disabled = true;
-        try { await api(`/api/kitaplar/${encodeURIComponent(kid)}/cevir`, { method: "POST", body: JSON.stringify({ sonra_studyo: sonraStudyo }) }); kitaplar(); }
-        catch (e) { alert(e.message); b.disabled = false; }
-      };
-      return b;
-    };
-    if (c.durum === "calisiyor") {
-      const yuzde = Math.floor(100 * (c.yapilan || 0) / (c.toplam || 1));
-      const dur = E("button", { class: "btn danger", type: "button" }, "Çeviriyi durdur");
-      dur.onclick = async () => { if (!confirm("Çeviri durdurulsun mu? (Yapılan kısım Translate'te silinir; sonra baştan başlatılır.)")) return;
-        await api(`/api/kitaplar/${encodeURIComponent(kid)}/cevir`, { method: "DELETE" }).catch(e => alert(e.message)); kitaplar(); };
-      cb.append(E("p", { class: "meta" }, E("span", {}, `${c.model} ile çevriliyor: ${c.yapilan || 0}/${c.toplam} paragraf (%${yuzde})`),
-        E("span", {}, c.kalan_sn ? `kalan ~${sureYaz(c.kalan_sn)}` : `tahmini toplam ~${sureYaz(c.tahmini_sn || 0)}`),
-        c.sonra_studyo ? E("span", {}, "bitince Stüdyo'ya gidecek") : null), E("div", { class: "alt" }, dur));
-    } else {
-      if (c.durum === "bitti") cb.append(E("p", { class: "meta" }, `Çevrildi (${c.model}, ${c.yazilan ?? c.toplam} paragraf)` +
-        (c.cevrilemeyen ? `; ${c.cevrilemeyen} paragraf çevrilemedi, okuma ekranında "[Çevrilemedi]" diye görünür` : "")));
-      if (c.durum === "hata") cb.append(E("p", { class: "uyari" }, "Çeviri durdu: " + (c.hata || "")));
-      if (c.durum === "durduruldu") cb.append(E("p", { class: "meta" }, "Çeviri durduruldu."));
-      if (eksik.paragraf) {
-        cb.append(E("p", { class: "meta" }, `${eksik.paragraf} paragrafın Türkçesi yok · tahmini ~${sureYaz(eksik.tahmini_sn)} (${eksik.model})`));
-        cb.append(E("div", { class: "alt" }, cevirBtn(false, "Türkçeye çevir")));
-      }
-    }
-    kutu.append(cb);
-  }
   if (ep.length && !d.diller?.includes("tr")) {
     kutu.append(E("div", {}, E("h3", {}, "Seslendirme ve öteki biçimler"),
-      E("p", { class: "meta" }, "Stüdyo'ya Türkçe metin gider. Çeviri bitince okuyup düzelt, sonra buradan Stüdyo'ya gönder.")));
+      E("p", { class: "meta" }, "Türkçe olmayan kitap (OpenITI vb.) yalnız kendi dilinde EPUB olarak kalır: çeviri, Osmanlıca ve seslendirme yapılmaz.")));
   }
   if (ep.length && d.diller?.includes("tr")) {
     const st = d.durum.studyo;
     const gonder = E("button", { class: "btn" + (st ? " ghost" : ""), type: "button" }, st ? "Stüdyo'ya yeniden gönder" : "Stüdyo'ya gönder");
     const bilgi = E("p", { class: "meta", "aria-live": "polite" });
-    const stBag = n => E("a", { href: `http://${location.hostname}:8070/`, target: "_blank", rel: "noopener" }, `Stüdyo'da aç (iş #${n})`);
+    const stBag = n => E("a", { href: "/studyo", target: "_blank", rel: "noopener" }, `Stüdyo'da aç (iş #${n})`);
     if (st) bilgi.append(`Gönderildi: ${new Date(st.tarih * 1000).toLocaleString("tr-TR")} · `, stBag(st.is));
     gonder.onclick = async () => {
       if (st && !confirm("Bu kitap Stüdyo'ya daha önce gönderilmiş. Düzeltmelerle yeniden gönderilsin mi? (Stüdyo'da yeni bir iş açılır)")) return;

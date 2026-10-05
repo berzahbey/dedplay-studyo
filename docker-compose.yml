@@ -1,3 +1,4 @@
+# Yalniz Studyo (Kitap Okuma ve Osmanlica cevirici ayri kuruluysa). Hepsi bir arada kurulum: docker-compose.stack.yml
 name: dedplay-studyo
 services:
   app:
@@ -10,12 +11,17 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - /DATA/AppData/dedplay-studyo/data:/data
+      - /DATA/AppData/dedplay-studyo/kutuphane:/data
+      - /DATA/AppData/dedplay-studyo/studyo:/studyo-data
       - /media/ZimaOS-HD/Kitap:/kaynak:ro
-      - /DATA/AppData/dedplay-kitap-okuma/seslendirme/text:/okuma-text:ro
+      - /DATA/AppData/dedplay-studyo/kitap-okuma/text:/okuma-text:ro
       - /media/ZimaOS-HD/Media/Music/audio:/cikti
+      - /media/ZimaOS-HD/Media/Kitaplar:/cikti-kitaplar
     environment:
-      - TRANSLATE_URL=http://host.docker.internal:8060
       - OKUMA_URL=http://host.docker.internal:8020
       - OSMANLICA_URL=http://host.docker.internal:8089
       - OSM_USE_OLLAMA=false
+      - STUDYO_DATA_DIR=/studyo-data
+      - CIKTI_DIR=/cikti-kitaplar
+      - STUDYO_URL=http://host.docker.internal:8070
+      - OTOMATIK_CEVIRI=0

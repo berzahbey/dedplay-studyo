@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from fastapi import File, UploadFile
 
-from . import ceviri, cikti, depo, epub, epubcheck, katalog, kaynak, osmanlica
+from . import cikti, depo, epub, epubcheck, katalog, kaynak, osmanlica
 from . import kitap as K
 
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
@@ -21,7 +21,6 @@ STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
     "Stüdyo": os.environ.get("STUDYO_URL", f"{HOST}:8070") + "/api/services",
-    "Translate": os.environ.get("TRANSLATE_URL", f"{HOST}:8060") + "/api/status",
     "Osmanlıca": os.environ.get("OSMANLICA_URL", f"{HOST}:8089") + "/",
 }
 
@@ -221,10 +220,6 @@ def kitap_ayrinti(kid: str):
         out["diller"] = K.diller(kit)
         out["fihrist"] = [{"id": b["id"], "seviye": b.get("seviye", 1), "metin": b["metin"]}
                           for b in bl if b["tur"] == "baslik"]
-        asil = kit["kunye"].get("asil_dil", "tr")
-        if asil != "tr":
-            _, eksik = ceviri.cevrilecekler(kit, asil)
-            out["ceviri_eksik"] = {"paragraf": len(eksik), "tahmini_sn": ceviri.tahmini_sure(eksik), "model": ceviri.MODEL}
         out["istatistik"] = {"blok": len(bl), "baslik": len(out["fihrist"]),
                              "sayfa": sum(len(b.get("sayfalar", [])) for b in bl),
                              "kelime": sum(len((b["metin"].get(kit["kunye"].get("asil_dil", "ar")) or "").split())
@@ -299,16 +294,6 @@ def studyoya_gonder(kid: str):
         raise HTTPException(502, str(e))
     depo.durum_yaz(kid, studyo=sonuc)
     return sonuc
-
-
-class CeviriIstegi(BaseModel):
-    sonra_studyo: bool = False
-
-
-@app.post("/api/kitaplar/{kid}/cevir")
-@app.delete("/api/kitaplar/{kid}/cevir")
-def cevir_kaldirildi(kid: str):
-    raise HTTPException(410, "Çeviri kaldırıldı (0.5.8)")
 
 
 # ---------------- Okuma ve düzeltme ----------------

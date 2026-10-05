@@ -2,7 +2,7 @@
 
 Her kitap şu aşamalardan geçer:
   detect    → dil belirlenir
-  translate → (Türkçe değilse) Translate çevirir, bitince Türkçe EPUB alınır
+  (Türkçe olmayan kitap durur: Stüdyo yalnız Türkçe kitap alır; Translate 5 Ekim 2026'da kaldırıldı)
   produce   → Kitap Okuma seslendirir  +  Osmanlıca çevirici parçaları çevirir (aynı anda)
   done
 """
@@ -131,32 +131,13 @@ class Worker(threading.Thread):
             if lang == "tr":
                 db.update(jid, lang="tr", tr_state="atlandi", stage="produce", book_name=j["title"])
             else:
-                tid = clients.tr_submit(src, j["filename"], lang)
-                db.update(jid, lang=lang, tr_job=tid, tr_state="sirada", stage="translate")
+                db.update(jid, lang=lang)
+                raise RuntimeError(f"Kitap Türkçe değil ({lang}). Stüdyo yalnız Türkçe kitap alır (çeviri yok). "
+                                   "Kitap Türkçeyse silip 'Kitap dili: Türkçe' seçerek yeniden ekleyin.")
             return
 
-        if stage == "translate":
-            t = clients.tr_job(j["tr_job"])
-            if t is None:
-                raise RuntimeError("Translate'teki çeviri işi bulunamadı (orada silinmiş olabilir).")
-            state = {"queued": "sirada", "running": "calisiyor", "paused": "duraklatildi",
-                     "error": "hata", "done": "bitti"}.get(t["status"], t["status"])
-            db.update(jid, tr_done=t["done"], tr_total=t["total"], tr_state=state,
-                      error=f"Çeviri durdu: {t['error']}" if state == "hata" else None)
-            if state == "bitti":
-                if j["auto_title"] == 1:  # otomatik başlık: Türkçe çevirinin ilk cümlesinden yeniden
-                    try:
-                        paras = textsrc.from_txt_bytes(clients.tr_text(j["tr_job"]), skip_title=True)
-                        yeni = textsrc.make_title(" ".join(paras[:1]))
-                        if yeni:
-                            db.update(jid, title=yeni)
-                            j = db.get(jid)
-                    except Exception:
-                        pass
-                name = f"{j['title']} - Türkçe"
-                clients.tr_download(j["tr_job"], "epub", os.path.join(db.job_dir(jid), name + ".epub"))
-                db.update(jid, stage="produce", book_name=name)
-            return
+        if stage == "translate":  # eski iş (Translate kaldırıldı)
+            raise RuntimeError("Bu iş Translate'te çevriliyordu; çeviri kaldırıldı. İşi silebilirsiniz.")
 
         if stage == "produce":
             self.step_okuma(db.get(jid), src)
@@ -280,10 +261,7 @@ def _original_parts(j):
         if j["lang"] == "tr":
             paras, notes = textsrc.extract_full(db.source_path(j["id"], j["filename"]))
         else:
-            if not j["tr_job"]:
-                return []
-            paras = textsrc.paragraflari_bastan_temizle(
-                textsrc.from_txt_bytes(clients.tr_text(j["tr_job"]), skip_title=True))
+            return []  # Türkçe olmayan kitap işlenmez (Translate kaldırıldı)
         paras = duzelt.duzelt(paras)  # satır içi üst bilgiler, bölünmüş kelimeler, çöp işaretler, sayfa atıfları
         if sum(len(p) for p in paras) < 50:
             return []
@@ -352,10 +330,6 @@ def save_outputs(job_id):
             data, _, fname = build(j, parts, fmt, variant)
             with open(os.path.join(folder, sd, fname.replace("/", "-")), "wb") as f:
                 f.write(data)
-    if j["tr_job"]:
-        for fmt in ("epub", "pdf"):
-            clients.tr_download(j["tr_job"], fmt, os.path.join(
-                folder, subdir[fmt], f"{j['title']} - Çeviri ve aslı.{fmt}".replace("/", "-")), 1)
     # MP3 parçaları: kitap adıyla, ek yer kaplamadan (aynı dosyaya ikinci ad = sabit bağlantı)
     mp3s = sorted(glob.glob(os.path.join(glob.escape(folder), "Parca_*.mp3")) +
                   glob.glob(os.path.join(glob.escape(folder), "Bolum_*.mp3")), key=_natural)
@@ -409,9 +383,6 @@ def resume(job_id):
     if not j:
         return
     upd = {"status": "active", "error": None}
-    if j["tr_state"] in ("hata", "duraklatildi") and j["tr_job"]:
-        clients.tr_resume(j["tr_job"])
-        upd["tr_state"] = "sirada"
     if j["ok_state"] == "hata":
         upd["ok_state"] = "bekliyor"  # yeniden gönderilir; Kitap Okuma biten parçaları atlar
     if j["osm_state"] == "hata":

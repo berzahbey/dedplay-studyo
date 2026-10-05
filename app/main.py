@@ -249,23 +249,11 @@ def audio(job_id: int, part: int = 0):
     return StreamingResponse(r.iter_content(1 << 16), media_type="application/octet-stream", headers=headers)
 
 
-@app.get("/api/jobs/{job_id}/translation")
-def translation(job_id: int, fmt: str = "epub", bilingual: int = 0):
-    """Translate'in kendi çıktıları (aslıyla birlikte iki dilli dahil)."""
-    job = db.get(job_id)
-    if not job or not job["tr_job"]:
-        raise HTTPException(404, "Bu kitap çevrilmedi.")
-    r = clients.tr_stream(job["tr_job"], fmt, bilingual)
-    cd = r.headers.get("content-disposition") or _disp(f"{job['title']}.{fmt}")["Content-Disposition"]
-    return StreamingResponse(r.iter_content(1 << 16), media_type=r.headers.get("content-type"),
-                             headers={"Content-Disposition": cd})
-
-
 @app.get("/api/services")
 def services():
     """Diğer uygulamalara ulaşılabiliyor mu?"""
     out = {}
-    for name, url in (("translate", clients.TRANSLATE + "/api/jobs"), ("okuma", clients.OKUMA + "/status"),
+    for name, url in (("okuma", clients.OKUMA + "/status"),
                       ("osmanlica", clients.OSMANLICA + "/docs")):
         try:
             out[name] = clients.requests.get(url, timeout=4).status_code < 500

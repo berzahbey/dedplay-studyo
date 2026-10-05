@@ -1,7 +1,7 @@
 # =============================================================================
 #  DEDPLAY STUDIO — HEPSİ BİR ARADA KURULUM
-#  Tek seferde 5 uygulama kurulur:
-#    Stüdyo (8070) · Translate (8060) · Kitap Okuma (8020) · Osmanlıca çevirici (8089) · Ollama (11435)
+#  Tek seferde 4 uygulama kurulur:
+#    Stüdyo (8070, Kütüphane dahil) · Kitap Okuma (8020) · Osmanlıca çevirici (8089) · Ollama (11435)
 #  + işlemci ayarı servisi: ZimaOS'un koyduğu 1 çekirdek sınırını otomatik kaldırır.
 #  Uygulamalar birbirine sunucunun kendisi üzerinden (portlarla) ulaşır; ZimaOS'un ağ ayarından etkilenmez.
 #  Uygulamaların kendi verileri otomatik olarak /DATA/AppData/dedplay-studyo/ altına gider.
@@ -12,8 +12,8 @@
 
 x-klasorler:
   # ▼▼▼ DEĞİŞTİRİLEBİLİR 1: KİTAP KLASÖRÜ ▼▼▼
-  # Okunacak / çevrilecek kitaplarının durduğu klasör.
-  # Stüdyo, Translate ve Kitap Okuma'daki "Sunucudan seç" bölümünde bu klasör görünür.
+  # Eklenecek kitaplarının durduğu klasör.
+  # Stüdyo ve Kitap Okuma'daki "Sunucudan seç" bölümünde bu klasör görünür.
   # Uygulamalar bu klasöre hiçbir şey yazmaz, sadece okur.
   kitap: &kitap /media/ZimaOS-HD/Kitap
 
@@ -34,18 +34,32 @@ services:
     container_name: dedplay-studyo
     extra_hosts: ["host.docker.internal:host-gateway"]
     restart: unless-stopped
-    depends_on: [translate, kitap-okuma, osmanlica]
+    depends_on: [kitap-okuma, osmanlica]
     ports:
       - "8070:8000"
     environment:
-      TRANSLATE_URL: http://host.docker.internal:8060
       OKUMA_URL: http://host.docker.internal:8020
       OSMANLICA_URL: http://host.docker.internal:8089
       OSM_USE_OLLAMA: "false"      # Osmanlıcada bilinmeyen kelimeler için Ollama (yavaşlatır)
+      DATA_DIR: /data              # Kütüphane verileri (kitaplar, OCR önbelleği, Surya modelleri)
+      STUDYO_DATA_DIR: /studyo-data
+      CIKTI_DIR: /cikti-kitaplar   # Kütüphane EPUB klasörü
+      STUDYO_URL: http://host.docker.internal:8070
+      OTOMATIK_CEVIRI: "0"
     volumes:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/studyo
+        target: /studyo-data
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /DATA/AppData/dedplay-studyo/kutuphane
         target: /data
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /media/ZimaOS-HD/Media/Kitaplar
+        target: /cikti-kitaplar
         bind:
           create_host_path: true
       - type: bind
@@ -65,42 +79,24 @@ services:
       volumes:
         - container: /kaynak
           description:
-            en_us: "Kitap klasörü: okunacak/çevrilecek kitapların bulunduğu klasör (sadece okunur)."
+            en_us: "Kitap klasörü: eklenecek kitapların bulunduğu klasör (sadece okunur)."
         - container: /cikti
           description:
             en_us: "Çıktı klasörü: sesli kitaplar ve bütün Türkçe/Osmanlıca dosyalar buraya kaydedilir."
         - container: /data
           description:
+            en_us: "Kütüphane verileri (kitaplar, düzeltmeler, OCR önbelleği). Değiştirme."
+        - container: /studyo-data
+          description:
             en_us: "Stüdyo verileri. Değiştirme."
+        - container: /cikti-kitaplar
+          description:
+            en_us: "Kütüphane'nin EPUB klasörü."
         - container: /okuma-text
           description:
             en_us: "Kitap Okuma'nın metin parçaları. Değiştirme."
 
-  # ---------------- Translate: Arapça / İngilizce / Fransızca → Türkçe ----------------
-  translate:
-    image: berzahbey/dedplay-translate:latest
-    container_name: dedplay-translate
-    extra_hosts: ["host.docker.internal:host-gateway"]
-    restart: unless-stopped
-    depends_on: [ollama]
-    ports:
-      - "8060:8000"
-    environment:
-      OLLAMA_URL: http://host.docker.internal:11435
-      LLM_MODEL: gemma3:12b        # ilk açılışta otomatik iner (~8 GB)
-      LLM_CTX: "4096"
-    volumes:
-      - type: bind
-        source: /DATA/AppData/dedplay-studyo/translate
-        target: /data
-        bind:
-          create_host_path: true
-      - type: bind
-        source: *kitap
-        target: /kaynak
-        read_only: true
-
-  # ---------------- Ollama: çeviri modelini çalıştırır ----------------
+  # ---------------- Ollama: Osmanlıca çeviricinin modelini (qwen2.5:7b) çalıştırır ----------------
   ollama:
     image: ollama/ollama:latest
     container_name: dedplay-ollama
@@ -210,9 +206,8 @@ x-casaos:
   title:
     en_us: Dedplay Studio
   tagline:
-    en_us: Kitabı ver; çevrilsin, seslendirilsin, Osmanlıcaya aktarılsın
+    en_us: Kitabı ver; temizlensin, EPUB olsun, seslendirilsin, Osmanlıcaya aktarılsın
   description:
     en_us: >-
-      Dedplay Studio, Translate, Kitap Okuma ve Osmanlıca çeviriciyi tek arayüzde birleştirir.
-      Türkçe olmayan kitaplar önce yerel yapay zekâ ile Türkçeye çevrilir; ardından aynı anda
-      seslendirilir (M4B) ve Osmanlıcaya aktarılır. Bütün çıktılar seçtiğin klasöre kaydedilir.
+      Dedplay Studio (Kütüphane dahil), Kitap Okuma ve Osmanlıca çeviriciyi tek arayüzde birleştirir.
+      Türkçe kitap temizlenir, EPUB olur; ardından seslendirilir (M4B) ve Osmanlıcaya aktarılır. Bütün çıktılar seçtiğin klasöre kaydedilir.

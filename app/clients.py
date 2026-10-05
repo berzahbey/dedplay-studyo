@@ -1,4 +1,4 @@
-"""Diğer üç dedplay uygulamasıyla HTTP üzerinden konuşur."""
+"""Diğer iki dedplay uygulamasıyla (Kitap Okuma, Osmanlıca çevirici) HTTP üzerinden konuşur."""
 import os
 import re
 import time
@@ -6,53 +6,10 @@ import time
 import requests
 
 HOST = "http://host.docker.internal"
-TRANSLATE = os.environ.get("TRANSLATE_URL", f"{HOST}:8060").rstrip("/")
 OKUMA = os.environ.get("OKUMA_URL", f"{HOST}:8020").rstrip("/")
 OSMANLICA = os.environ.get("OSMANLICA_URL", f"{HOST}:8089").rstrip("/")
 OSM_OLLAMA = os.environ.get("OSM_USE_OLLAMA", "false").lower() in ("1", "true", "yes", "evet")
 T = 30
-
-
-# ---------------- Translate ----------------
-def tr_submit(path, filename, lang):
-    with open(path, "rb") as f:
-        r = requests.post(f"{TRANSLATE}/api/jobs", files={"file": (filename, f)},
-                          data={"src_lang": lang if lang in ("ar", "en", "fr") else "auto"}, timeout=900)
-    r.raise_for_status()
-    return r.json()["id"]
-
-
-def tr_job(tid):
-    r = requests.get(f"{TRANSLATE}/api/jobs", timeout=T)
-    r.raise_for_status()
-    return next((j for j in r.json() if j["id"] == tid), None)
-
-
-def tr_resume(tid):
-    requests.post(f"{TRANSLATE}/api/jobs/{tid}/resume", timeout=T).raise_for_status()
-
-
-def tr_download(tid, fmt, dest, bilingual=0):
-    with requests.get(f"{TRANSLATE}/api/jobs/{tid}/download", params={"fmt": fmt, "bilingual": bilingual},
-                      stream=True, timeout=600) as r:
-        r.raise_for_status()
-        with open(dest, "wb") as f:
-            for chunk in r.iter_content(1 << 16):
-                f.write(chunk)
-
-
-def tr_text(tid):
-    """Translate'in çevirdiği Türkçe metnin düz hâli (TXT, aslı olmadan)."""
-    r = requests.get(f"{TRANSLATE}/api/jobs/{tid}/download", params={"fmt": "txt", "bilingual": 0}, timeout=600)
-    r.raise_for_status()
-    return r.content
-
-
-def tr_stream(tid, fmt, bilingual):
-    r = requests.get(f"{TRANSLATE}/api/jobs/{tid}/download", params={"fmt": fmt, "bilingual": bilingual},
-                     stream=True, timeout=600)
-    r.raise_for_status()
-    return r
 
 
 # ---------------- Kitap Okuma ----------------

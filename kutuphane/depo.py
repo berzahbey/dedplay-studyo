@@ -18,7 +18,7 @@ import unicodedata
 import requests
 
 from . import epub as EPUB
-from . import ceviri, cikti, epubcheck, kaynak, katalog, openiti, osmanlica
+from . import cikti, epubcheck, kaynak, katalog, openiti, osmanlica
 from . import kitap as K
 
 VERI = os.environ.get("DATA_DIR", "/data")
@@ -75,7 +75,7 @@ def liste():
             continue
         d = durum_oku(kid)
         out.append({"kimlik": kid, **{k: d.get(k) for k in ("baslik", "baslik_asil", "yazar", "asama", "hata", "uyari", "guncellendi",
-                                                            "cikti", "cikti_uyari", "studyo", "ceviri",
+                                                            "cikti", "cikti_uyari", "studyo",
                                                             "eklendi", "epublar")}})
     return sorted(out, key=lambda x: -(x.get("eklendi") or 0))
 
@@ -259,80 +259,14 @@ def _isle(tur, kid, arg):
                         except Exception as e:
                             durum_yaz(kid, uyari=f"Künyenin Osmanlıcası çevrilemedi: {type(e).__name__}")
             epub_uret(kid)
-            # 1. aşama bitti: kitap kendi dilinde Kütüphane'de. 2. aşama: Türkçe değilse çeviri, Türkçeyse Osmanlıca
-            if tur == "openiti":
-                _otomatik_ceviri(kid)
-            elif tur == "dosya":
+            # 1. aşama bitti: kitap kendi dilinde Kütüphane'de. 2. aşama: Türkçeyse Osmanlıca (çeviri yok; OpenITI yalnız Arapça EPUB)
+            if tur == "dosya":
                 kit = K.yukle(kitap_yolu(kid))
                 if kit["kunye"].get("asil_dil") == "tr":
                     is_ekle("osmanlica", kid, tur="epub")
-            _studyo_bekleyen(kid)
         except Exception as e:
             traceback.print_exc()
             durum_yaz(kid, asama="hata", hata=f"{type(e).__name__}: {e}")
-
-
-OTOMATIK_CEVIRI = False  # 0.5.8: çeviri kaldırıldı (Translate yok)
-
-
-def _otomatik_ceviri(kid):
-    """Türkçe olmayan kitap temizlenip EPUB'u hazır olunca Türkçe çevirisi kendiliğinden başlar."""
-    if not OTOMATIK_CEVIRI:
-        return
-    c = durum_oku(kid).get("ceviri") or {}
-    if c.get("durum") in ("calisiyor", "bitti", "durduruldu"):
-        return  # sürüyor, bitmiş ya da kullanıcı durdurmuş
-    kit = K.yukle(kitap_yolu(kid))
-    asil = kit["kunye"].get("asil_dil", "tr")
-    if asil == "tr" or not ceviri.cevrilecekler(kit, asil)[1]:
-        return
-    try:
-        durum_yaz(kid, ceviri=ceviri.baslat(kit, klasor(kid)))
-    except Exception as e:
-        durum_yaz(kid, uyari=f"Türkçe çeviri başlatılamadı ({str(e)[:120]}); kitap sayfasından başlatabilirsin")
-
-
-def _studyo_bekleyen(kid):
-    """'Türkçeye çevir ve Stüdyo'ya gönder': çeviri bitip EPUB'lar üretilince Türkçesi Stüdyo'ya gider."""
-    c = durum_oku(kid).get("ceviri") or {}
-    if not (c.get("sonra_studyo") and c.get("durum") == "bitti" and not c.get("gonderildi")):
-        return
-    try:
-        sonuc = cikti.studyoya_gonder(K.yukle(kitap_yolu(kid)))
-        durum_yaz(kid, studyo=sonuc, ceviri=dict(c, gonderildi=True))
-    except Exception as e:
-        durum_yaz(kid, uyari=f"Stüdyo'ya gönderilemedi: {str(e)[:150]} (kitap sayfasından yeniden gönderebilirsin)",
-                  ceviri=dict(c, gonderildi=True))
-
-
-def ceviri_izleyici():
-    """Süren çevirileri yarım dakikada bir yoklar; biten çeviriyi kitaba yazar, Osmanlıca ve EPUB'ları kuyruğa koyar."""
-    while True:
-        for k in liste():
-            kid = k["kimlik"]
-            c = durum_oku(kid).get("ceviri") or {}
-            if c.get("durum") != "calisiyor":
-                continue
-            try:
-                yeni, ciktilar = ceviri.yokla(c)
-            except Exception as e:  # geçici bağlantı sorunu: sonra tekrar
-                durum_yaz(kid, ceviri=dict(c, not_=f"Translate'e ulaşılamadı, tekrar denenecek ({type(e).__name__})"))
-                continue
-            yeni.pop("not_", None)
-            if ciktilar is None:
-                durum_yaz(kid, ceviri=yeni)
-                continue
-            try:
-                with kitap_kilidi(kid):
-                    kit = K.yukle(kitap_yolu(kid))
-                    yeni["yazilan"] = ceviri.uygula(kit, klasor(kid), ciktilar)
-                    K.kaydet(kit, kitap_yolu(kid))
-                durum_yaz(kid, ceviri=yeni)
-                is_ekle("osmanlica", kid, tur="epub")  # Türkçeden Osmanlıca, sonra EPUB'lar (ve gerekirse Stüdyo)
-            except Exception as e:
-                traceback.print_exc()
-                durum_yaz(kid, ceviri=dict(yeni, durum="hata", hata=f"Çeviri kitaba yazılamadı: {e}"))
-        time.sleep(30)
 
 
 def is_ekle(is_turu, kid, arg=None, **durum):

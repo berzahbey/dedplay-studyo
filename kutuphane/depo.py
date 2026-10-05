@@ -75,7 +75,7 @@ def liste():
             continue
         d = durum_oku(kid)
         out.append({"kimlik": kid, **{k: d.get(k) for k in ("baslik", "baslik_asil", "yazar", "asama", "hata", "uyari", "guncellendi",
-                                                            "cikti", "cikti_uyari", "studyo",
+                                                            "cikti", "cikti_uyari", "studyo", "studyo_uyari",
                                                             "eklendi", "epublar")}})
     return sorted(out, key=lambda x: -(x.get("eklendi") or 0))
 
@@ -200,6 +200,28 @@ def _osmanlica(kid, zorla=False):
         durum_yaz(kid, uyari=f"Osmanlıca çevrilemedi ({type(e).__name__}: {str(e)[:120]}); sadece Türkçe üretildi")
 
 
+def _studyoya_zincirle(kid):
+    """Tur 2/A: Osmanlıca ve EPUB'lar bitince Türkçe kitap kendiliğinden Stüdyo'ya gider (seslendirme ve öteki biçimler).
+    Kitabın Stüdyo işi zaten varsa yeni iş açılmaz (düzeltmeden sonra yenileme tur 2/C). Osmanlıca çevrilemediyse
+    gönderilmez: Stüdyo Osmanlıcayı ikinci kez çevirmesin; 'Osmanlıcayı yeniden çevir' başarılı olunca gider."""
+    kit = K.yukle(kitap_yolu(kid))
+    if kit["kunye"].get("asil_dil") != "tr" or "tr" not in K.diller(kit):
+        return
+    d = durum_oku(kid)
+    if d.get("uyari"):
+        durum_yaz(kid, studyo_uyari="Osmanlıca çevrilemediği için seslendirmeye gönderilmedi; "
+                                    "'Osmanlıcayı yeniden çevir' başarılı olunca kendiliğinden gider.")
+        return
+    eski = (d.get("studyo") or {}).get("is")
+    if eski and cikti.studyo_isi_var(eski):
+        return
+    try:
+        durum_yaz(kid, studyo=cikti.studyoya_gonder(kit), studyo_uyari=None)
+    except Exception as e:
+        traceback.print_exc()
+        durum_yaz(kid, studyo_uyari=f"Seslendirmeye gönderilemedi: {type(e).__name__}: {str(e)[:150]}")
+
+
 def durum_asama(kid, mesaj):
     durum_yaz(kid, asama=mesaj)
 
@@ -259,6 +281,8 @@ def _isle(tur, kid, arg):
                         except Exception as e:
                             durum_yaz(kid, uyari=f"Künyenin Osmanlıcası çevrilemedi: {type(e).__name__}")
             epub_uret(kid)
+            if tur == "osmanlica":  # tur 2/A: Osmanlıca ve EPUB'lar hazır -> kendiliğinden Stüdyo
+                _studyoya_zincirle(kid)
             # 1. aşama bitti: kitap kendi dilinde Kütüphane'de. 2. aşama: Türkçeyse Osmanlıca (çeviri yok; OpenITI yalnız Arapça EPUB)
             if tur == "dosya":
                 kit = K.yukle(kitap_yolu(kid))

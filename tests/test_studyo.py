@@ -26,7 +26,12 @@ K.sil(kit, "b00003")
 
 p = cikti.studyo_parcalari(kit)
 ok([x["name"] for x in p][-1] == "Dipnot_001" and all(x["name"].startswith("Parca_") for x in p[:-1]), "Parçalar: bölümler Parca_, dipnotlar Dipnot_")
-ok(all("osm" not in x for x in p), "Stüdyo'ya sadece Türkçe gider (Osmanlıcaya Stüdyo çevirir)")
+ok(all(len(x["tr"].split("\n")) == len(x["osm"].split("\n")) for x in p),
+   "Tur 2/A: Türkçe ve Osmanlıca satır satır eşleşik gider (Stüdyo yeniden çevirmez)")
+ok("حمد اللهدر." in p[0]["osm"] and "{{" not in p[0]["osm"], "Kütüphane'nin Osmanlıcası gider, dipnot işareti gitmez")
+_tl, _ol = p[0]["tr"].split("\n"), p[0]["osm"].split("\n")
+ok(_ol[_tl.index("Osmanlıcası olmayan satır.")] == "", "Osmanlıcası olmayan satırın karşısı boş (kayma yok)")
+ok(p[-1]["osm"].split("\n") == [cikti.DIPNOT_OSM, "1. حاشیه"], "Dipnotların Osmanlıcası da gider")
 ok(p[0]["tr"].split("\n")[0] == "GİRİŞ" and "Bölüm 001" not in p[0]["tr"], "Bölüm, başlığıyla başlar (etiket seslendirmede okunmaz)")
 ok("{{" not in "".join(x["tr"] for x in p), "Dipnot işaretleri gitmez")
 ok("Çöp satır" not in "".join(x["tr"] for x in p), "Silinen satır gitmez")

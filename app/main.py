@@ -158,11 +158,20 @@ class KutuphaneKitap(BaseModel):
 @app.post("/api/jobs/from-kutuphane")
 def job_from_kutuphane(k: KutuphaneKitap):
     """Dedplay Kütüphane'de hazırlanmış (düzeltilmiş) kitap: parçalar Türkçe + Osmanlıca hazır gelir."""
+    try:
+        return {"id": kutuphane_isi(k.title, k.osm_title, [p.model_dump() for p in k.parts])}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def kutuphane_isi(baslik, osm_baslik, parcalar):
+    """Tur 2/A: Kütüphane aynı süreçten çağırır (HTTP yok). parcalar: [{"name", "tr", "osm"}]. Döndürür: iş no."""
+    k = KutuphaneKitap(title=baslik or "", osm_title=osm_baslik or "", parts=parcalar)
     import re as _re
     from .worker import parts_to_epub
     ana = [p for p in k.parts if p.name.startswith("Parca_") and p.tr.strip()]
     if not ana:
-        raise HTTPException(400, "Kitapta metin parçası yok.")
+        raise ValueError("Kitapta metin parçası yok.")
     title = _re.sub("[" + _re.escape(chr(92) + "/:*?" + chr(34) + "<>|") + "]+", " ", k.title or "")
     title = _re.sub(r"\s+", " ", title).strip(" .")[:80] or "Kütüphane kitabı"
     name = title + ".epub"
@@ -178,7 +187,7 @@ def job_from_kutuphane(k: KutuphaneKitap):
               osm_state="bitti" if hazir_osm else "calisiyor", osm_done=n if hazir_osm else 0, osm_total=n,
               osm_title=(k.osm_title or "").strip() or None,
               note="Dedplay Kütüphane'den geldi", status="active")
-    return {"id": jid}
+    return jid
 
 
 @app.post("/api/jobs/{job_id}/resume")

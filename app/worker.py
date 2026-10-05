@@ -165,6 +165,8 @@ class Worker(threading.Thread):
         jid, name, state = j["id"], j["book_name"], j["ok_state"]
         if state == "bitti":
             return
+        if state == "bekliyor" and _baska_seslendirme_var(jid):
+            return  # tur 2/A: kitaplar kendiliğinden geldiği için seslendirme tek tek (sayı tur 4'te ölçülerek)
         if state == "bekliyor":
             # Seslendirme de Stüdyo'nun temiz metninden yapılır (ön sayfalar, içindekiler ve dipnotlar hariç).
             ana = [p for p in db.all_parts(jid) if p["name"].startswith("Parca_")]
@@ -272,6 +274,12 @@ def _original_parts(j):
 
 
 Worker.original_parts = staticmethod(_original_parts)
+
+
+def _baska_seslendirme_var(jid):
+    """Kitap Okuma her yüklenen kitabı ayrı iş parçacığında hemen başlatır: aynı anda çok kitap sunucuyu boğar.
+    Başka bir etkin işin seslendirmesi sürüyorsa (sırada/çalışıyor) bu iş bekler."""
+    return any(o["id"] != jid and o["ok_state"] in ("sirada", "calisiyor") for o in db.active_jobs())
 
 
 def _ocr_ile_dil(path):

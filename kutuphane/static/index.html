@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dedplay Kütüphane</title>
+<title>Dedplay Stüdyo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -48,6 +48,9 @@ button:focus-visible, input:focus-visible, a:focus-visible, summary:focus-visibl
 input[type=search], input[type=text] { font: 1rem var(--sans); padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--surface); color: var(--ink); width: 100%; }
 .ara { display: flex; gap: 10px; margin-top: 20px; }
+textarea { font: 1rem/1.6 var(--sans); padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink); width: 100%; resize: vertical; }
+.metin-ekle { display: grid; gap: 10px; margin-top: 14px; }
 .not { color: var(--muted); font-size: .9rem; margin: 10px 0 0; }
 ul.eserler { list-style: none; margin: 18px 0 0; padding: 0; border-top: 1px solid var(--line); }
 ul.eserler > li { border-bottom: 1px solid var(--line); padding: 16px 4px; display: grid; grid-template-columns: 1fr auto; gap: 6px 18px; align-items: center; }
@@ -96,8 +99,8 @@ details.fihrist summary { cursor: pointer; font: 600 1.05rem var(--serif); }
   <header>
     <div class="mark" aria-hidden="true">ك</div>
     <div>
-      <h1>Dedplay Kütüphane</h1>
-      <p class="lead">Elindeki kitapları onar, klasik eserleri bul; fihristli, sayfa numaralı Türkçe ve Osmanlıca EPUB olarak al.</p>
+      <h1>Dedplay Stüdyo</h1>
+      <p class="lead">Kitabı ya da metni ver: metin onarılır, Osmanlıcaya çevrilir, Türkçe ve Osmanlıca EPUB'lar hazırlanır ve kendiliğinden seslendirilir. <a href="/studyo">Seslendirme durumu →</a></p>
     </div>
   </header>
   <div class="services" id="servisler" aria-live="polite"></div>
@@ -122,6 +125,15 @@ details.fihrist summary { cursor: pointer; font: 600 1.05rem var(--serif); }
       <input type="file" id="dosya" accept=".pdf,.epub,.docx,.txt" aria-label="Kitap dosyası">
       <button class="btn" type="button" id="yukleBtn">Yükle ve ekle</button>
       <span class="not" id="yukleDurum" aria-live="polite"></span>
+    </div>
+    <h2>Metin yapıştır</h2>
+    <div class="metin-ekle">
+      <input type="text" id="metinBaslik" placeholder="Başlık (boş bırakırsan &quot;Metin&quot;)" aria-label="Başlık">
+      <textarea id="metinGovde" rows="8" placeholder="Türkçe metni buraya yapıştır" aria-label="Metin"></textarea>
+      <div class="yukle" style="margin-top:0">
+        <button class="btn" type="button" id="metinBtn">Ekle</button>
+        <span class="not" id="metinDurum" aria-live="polite"></span>
+      </div>
     </div>
   </section>
 
@@ -244,6 +256,17 @@ $("#yukleBtn").onclick = async () => {
   } catch (e) { $("#yukleDurum").textContent = e.message; }
   $("#yukleBtn").disabled = false;
 };
+$("#metinBtn").onclick = async () => {
+  const metin = $("#metinGovde").value.trim();
+  if (metin.length < 20) { $("#metinDurum").textContent = "Metin çok kısa."; return; }
+  $("#metinBtn").disabled = true; $("#metinDurum").textContent = "Ekleniyor…";
+  try {
+    await api("/api/kitaplar/metin", { method: "POST", body: JSON.stringify({ baslik: $("#metinBaslik").value.trim(), metin }) });
+    $("#metinDurum").textContent = "Eklendi. \"Kitaplarım\" sekmesinde ilerlemesini görebilirsin.";
+    $("#metinGovde").value = ""; $("#metinBaslik").value = ""; kitaplar();
+  } catch (e) { $("#metinDurum").textContent = e.message; }
+  $("#metinBtn").disabled = false;
+};
 
 // ---- kitaplarım
 const arapHarfli = s => /[\u0600-\u06FF]/.test(s || "");
@@ -258,7 +281,7 @@ async function kitaplar() {
   try { liste = await api("/api/kitaplar"); } catch (e) { return; }
   const ul = $("#kitaplar"); ul.replaceChildren();
   if (!liste.length) {
-    ul.append(E("li", { class: "bos" }, "Henüz kitap yok. \"OpenITI'de ara\" sekmesinden bir eser bulup ekle."));
+    ul.append(E("li", { class: "bos" }, "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
   }
   for (const k of liste) {
     const li = E("li", { class: k.kimlik === acik ? "acik" : "" },
@@ -321,20 +344,21 @@ async function ayrinti(kid, li) {
   }
   if (ep.length && d.diller?.includes("tr")) {
     const st = d.durum.studyo;
-    const gonder = E("button", { class: "btn" + (st ? " ghost" : ""), type: "button" }, st ? "Stüdyo'ya yeniden gönder" : "Stüdyo'ya gönder");
+    const gonder = E("button", { class: "btn" + (st ? " ghost" : ""), type: "button" }, st ? "Seslendirmeye yeniden gönder" : "Seslendirmeye gönder");
     const bilgi = E("p", { class: "meta", "aria-live": "polite" });
-    const stBag = n => E("a", { href: "/studyo", target: "_blank", rel: "noopener" }, `Stüdyo'da aç (iş #${n})`);
+    const stBag = n => E("a", { href: "/studyo", target: "_blank", rel: "noopener" }, `Seslendirme durumu (iş #${n})`);
     if (st) bilgi.append(`Gönderildi: ${new Date(st.tarih * 1000).toLocaleString("tr-TR")} · `, stBag(st.is));
     gonder.onclick = async () => {
-      if (st && !confirm("Bu kitap Stüdyo'ya daha önce gönderilmiş. Düzeltmelerle yeniden gönderilsin mi? (Stüdyo'da yeni bir iş açılır)")) return;
+      if (st && !confirm("Bu kitap seslendirmeye daha önce gönderilmiş. Düzeltmelerle yeniden gönderilsin mi? (yeni bir seslendirme işi açılır)")) return;
       gonder.disabled = true; bilgi.replaceChildren("Gönderiliyor…");
       try { const v = await api(`/api/kitaplar/${encodeURIComponent(kid)}/studyo`, { method: "POST" });
-            bilgi.replaceChildren(`Gönderildi (${v.parca} parça). Stüdyo seslendirip PDF, Word, HTML ve TXT biçimlerini üretecek · `, stBag(v.is)); }
+            bilgi.replaceChildren(`Gönderildi (${v.parca} parça). Seslendirme ve PDF, Word, HTML, TXT biçimleri üretilecek · `, stBag(v.is)); }
       catch (e) { bilgi.replaceChildren(e.message); }
       gonder.disabled = false;
     };
     kutu.append(E("div", {}, E("h3", {}, "Seslendirme ve öteki biçimler"),
-      E("p", { class: "meta" }, "Kitabın Türkçesi, düzeltmelerinle birlikte Stüdyo'ya gider. Stüdyo seslendirir, Osmanlıcaya çevirir; ses ve biçimler Stüdyo'nun çıktı klasörüne kaydedilir."),
+      E("p", { class: "meta" }, "Osmanlıca bitince kitap kendiliğinden seslendirmeye gider (Türkçe ve Osmanlıcası, düzeltmelerinle); PDF, Word, HTML ve TXT biçimleri de üretilir. Seslendirme kitap kitap sırayla yapılır."),
+      d.durum.studyo_uyari ? E("p", { class: "uyari" }, d.durum.studyo_uyari) : null,
       E("div", { class: "alt" }, gonder), bilgi));
   }
   if (d.fihrist?.length) {

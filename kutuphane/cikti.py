@@ -2,8 +2,8 @@
 
 1) Çıktı klasörü (CIKTI_DIR, varsayılan /cikti = /media/ZimaOS-HD/Media/Kitaplar): EPUB'lar dile göre klasörlerde
    Türkçe/, Osmanlıca/, Türkçe-Osmanlıca/, Arapça/, Arapça-Türkçe/  ->  "Eser adı - Yazar.epub"
-2) Stüdyo'ya gönderme: bölümlerin sadece Türkçesi (düzeltilmiş hâliyle) parçalar olarak gider; Stüdyo seslendirir,
-   Osmanlıcaya kendisi çevirir ve öteki biçimleri kendi çıktı klasörüne, kendi düzeniyle kaydeder.
+2) Stüdyo'ya gönderme (tur 2/A): bölümlerin Türkçesi ve Kütüphane'nin Osmanlıcası (elle düzeltmeler dahil) satır satır
+   eşleşik parçalar olarak, aynı süreçte gider; Stüdyo Osmanlıcayı yeniden çevirmez, seslendirir ve öteki biçimleri üretir.
 """
 import os
 import re
@@ -22,6 +22,7 @@ KLASOR_ADI = {("tr",): "Türkçe", ("osm",): "Osmanlıca", ("tr", "osm"): "Türk
               ("fr",): "Fransızca", ("fr", "tr"): "Fransızca-Türkçe"}
 _YASAK = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 PARCA_HARF = 15000  # Stüdyo'ya giden bir parçanın (bir ses dosyasının) en fazla uzunluğu
+DIPNOT_OSM = "حواشی"  # "DİPNOTLAR" başlığının Osmanlıcası (havâşî)
 
 
 def dosya_adi(kit):
@@ -69,25 +70,26 @@ def studyo_parcalari(kit):
     gor = K.gorunur(kit)
     if "tr" not in K.diller(gor):
         raise ValueError("Kitabın Türkçesi yok: önce Türkçeye çevrilmeli")
-    ana_dil = "tr"  # Stüdyo'ya sadece Türkçe gider; Osmanlıcaya Stüdyo kendisi çevirir
+    ana_dil = "tr"  # tur 2/A: Türkçe + Kütüphane'nin Osmanlıcası (Osmanlıcası olmayan satırın karşısı boş kalır)
     yapi = EPUB._Uretici(gor, [ana_dil]).yapi()
     bloklar = {b["id"]: b for b in gor["bloklar"]}
     parcalar, satirlar = [], []
     for bolum in yapi:  # uzun bölüm, paragraf sınırından ~15.000 harflik parçalara (her parça bir ses dosyası)
-        tr, uz = [], 0
+        tr, osm, uz = [], [], 0
         for bid in bolum["bloklar"]:
             t = _temiz(bloklar[bid]["metin"].get(ana_dil))
             if not t:
                 continue
             if tr and uz + len(t) > PARCA_HARF:
-                satirlar.append(tr)
-                tr, uz = [], 0
+                satirlar.append((tr, osm))
+                tr, osm, uz = [], [], 0
             tr.append(t)
+            osm.append(_temiz(bloklar[bid]["metin"].get("osm")))
             uz += len(t)
         if tr:
-            satirlar.append(tr)
-    for i, tr in enumerate(satirlar, 1):
-        parcalar.append({"name": f"Parca_{i:03d}", "tr": "\n".join(tr)})
+            satirlar.append((tr, osm))
+    for i, (tr, osm) in enumerate(satirlar, 1):
+        parcalar.append({"name": f"Parca_{i:03d}", "tr": "\n".join(tr), "osm": "\n".join(osm)})
     # dipnotlar: EPUB'daki numaralarla (görünüş sırası)
     sira = []
     for b in gor["bloklar"]:
@@ -96,21 +98,32 @@ def studyo_parcalari(kit):
                 sira.append(g)
     if sira:
         tr = ["DİPNOTLAR"] + [f"{n}. {_temiz(gor['dipnotlar'][g]['metin'].get(ana_dil))}" for n, g in enumerate(sira, 1)]
-        parcalar.append({"name": "Dipnot_001", "tr": "\n".join(tr)})
+        osm = [DIPNOT_OSM]
+        for n, g in enumerate(sira, 1):
+            o = _temiz(gor["dipnotlar"][g]["metin"].get("osm"))
+            osm.append(f"{n}. {o}" if o else "")
+        parcalar.append({"name": "Dipnot_001", "tr": "\n".join(tr), "osm": "\n".join(osm)})
     return parcalar
 
 
 def studyoya_gonder(kit):
+    """Tur 2/A: aynı süreçte (tek uygulama) Stüdyo işi açar; Osmanlıca hazır gider."""
+    from app import main as studyo
     ku = kit["kunye"]
     baslik = ku["baslik"].get("tr") or ku["baslik"].get(ku.get("asil_dil", "tr")) or "Kitap"
-    govde = {"title": re.sub(r"\s+", " ", _YASAK.sub(" ", baslik)).strip(" ."), "parts": studyo_parcalari(kit)}
-    r = requests.post(f"{STUDYO_URL}/api/jobs/from-kutuphane", json=govde, timeout=120)
-    if r.status_code in (404, 405):
-        raise RuntimeError("Stüdyo bu özelliği henüz bilmiyor (Stüdyo'yu güncelleyin: from-kutuphane)")
-    if r.status_code >= 400:
-        try:
-            mesaj = r.json().get("detail")
-        except ValueError:
-            mesaj = r.text[:200]
-        raise RuntimeError(f"Stüdyo kabul etmedi: {mesaj}")
-    return {"is": r.json()["id"], "tarih": int(time.time()), "parca": len(govde["parts"])}
+    parcalar = studyo_parcalari(kit)
+    try:
+        jid = studyo.kutuphane_isi(re.sub(r"\s+", " ", _YASAK.sub(" ", baslik)).strip(" ."),
+                                   (ku["baslik"].get("osm") or "").strip(), parcalar)
+    except ValueError as e:
+        raise RuntimeError(f"Stüdyo kabul etmedi: {e}")
+    return {"is": jid, "tarih": int(time.time()), "parca": len(parcalar)}
+
+
+def studyo_isi_var(jid):
+    """Bu numaralı Stüdyo işi hâlâ duruyor mu (Stüdyo'da silindiyse kitap yeniden gönderilebilir)."""
+    from app import db as sdb
+    try:
+        return sdb.get(int(jid)) is not None
+    except (TypeError, ValueError):
+        return False

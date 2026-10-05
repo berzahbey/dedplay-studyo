@@ -55,7 +55,7 @@ for h in birlesik.app.router.on_startup:
 ok(os.path.exists(db.DB_PATH), "Stüdyo veritabanı kendi klasöründe kuruldu")
 ok(os.path.isdir(depo.KITAPLAR), "Kütüphane kitap klasörü kuruldu")
 
-ok("Kütüphane" in bul("/")(), "Ana sayfa Kütüphane ekranı")
+ok("OpenITI'de ara" in bul("/")() and "Dedplay Stüdyo" in bul("/")(), "Ana sayfa kitap ekranı (eski Kütüphane), adı Dedplay Stüdyo")
 r = bul("/studyo")()
 ok(r.path.endswith(os.path.join("app", "static", "index.html")) and "/api/jobs" in open(r.path, encoding="utf-8").read(),
    "Eski Stüdyo ekranı /studyo adresinde")

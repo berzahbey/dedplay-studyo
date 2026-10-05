@@ -20,11 +20,11 @@ SURUM = "0.5.17"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
-    "Stüdyo": os.environ.get("STUDYO_URL", f"{HOST}:8070") + "/api/services",
+    "Seslendirme (Kitap Okuma)": os.environ.get("OKUMA_URL", f"{HOST}:8020") + "/status",
     "Osmanlıca": os.environ.get("OSMANLICA_URL", f"{HOST}:8089") + "/",
 }
 
-app = FastAPI(title="Dedplay Kütüphane", version=SURUM)
+app = FastAPI(title="Dedplay Stüdyo", version=SURUM)
 
 
 @app.on_event("startup")

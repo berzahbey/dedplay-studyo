@@ -3,7 +3,7 @@ import shutil
 import sqlite3
 import time
 
-DATA_DIR = os.environ.get("DATA_DIR", "/data")
+DATA_DIR = os.environ.get("STUDYO_DATA_DIR") or os.environ.get("DATA_DIR", "/data")  # tek uygulamada: STUDYO_DATA_DIR
 DB_PATH = os.path.join(DATA_DIR, "studyo.db")
 WORK = os.path.join(DATA_DIR, "work")
 

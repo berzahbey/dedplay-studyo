@@ -237,7 +237,9 @@ function editorAc(b, kutu) {
   if (acikEditor) acikEditor.remove();
   const alanlar = {}, hata = E("p", { class: "hata", "aria-live": "polite" });
   const ed = E("div", { class: "editor", role: "group", "aria-label": "Paragrafı düzelt" });
-  for (const d of gosterilen.filter(d => b.metin[d] != null)) {
+  // tur 2/D: yalnız Türkçe düzeltilir; Osmanlıcası sunucuda kendiliğinden yenilenir (Türkçesi olmayan kitapta kendi dili)
+  const duzDiller = b.metin.tr != null ? ["tr"] : gosterilen.filter(d => b.metin[d] != null && d !== "osm").slice(0, 1);
+  for (const d of duzDiller) {
     const ta = E("textarea", { lang: LANG[d], dir: YON[d] }); ta.value = b.metin[d]; alanlar[d] = ta;
     ed.append(E("label", {}, ADLAR[d] + (b.elle?.[d] ? " (elle düzeltilmiş)" : ""), ta));
   }
@@ -256,7 +258,7 @@ function editorAc(b, kutu) {
     try {
       const v = await api(`/api/kitaplar/${encodeURIComponent(kid)}/blok/${b.id}${yol}`, istek);
       const i = bolum.bloklar.findIndex(x => x.id === b.id); bolum.bloklar[i] = v.blok;
-      const yeni = blokCiz(v.blok); kutu.replaceWith(yeni); acikEditor = null;
+      const yeni = blokCiz(v.blok); kutu.replaceWith(yeni); ed.remove(); acikEditor = null;   // kayıttan sonra kutu kapanır
       durumYaz((v.uyari || []).join(" ") || "Kaydedildi. EPUB'lar arka planda güncelleniyor.", v.uyari?.length ? 6000 : 2500);
       if (istek.body && JSON.parse(istek.body).tur) kitapBilgi(false);
     } catch (e) { hata.textContent = e.message; kaydet.disabled = false; }

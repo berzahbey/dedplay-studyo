@@ -178,6 +178,10 @@ def kutuphane_isi(baslik, osm_baslik, parcalar):
         raise ValueError("Kitapta metin parçası yok.")
     title = _re.sub("[" + _re.escape(chr(92) + "/:*?" + chr(34) + "<>|") + "]+", " ", k.title or "")
     title = _re.sub(r"\s+", " ", title).strip(" .")[:120] or "Kütüphane kitabı"   # EPUB adıyla aynı uzunluk
+    temel, n = title, 1
+    while db.q("SELECT 1 FROM jobs WHERE book_name=? OR title=?", (title, title), one=True):
+        n += 1                               # tur 2/D: aynı adlı başka iş varsa çıktılar üst üste yazılmasın
+        title = f"{temel} ({n})"
     name = title + ".epub"
     jid = db.create_job(name, "tr")
     hazir_osm = any(p.osm.strip() for p in k.parts)  # Osmanlıca gelmediyse Stüdyo kendisi çevirir
@@ -206,7 +210,20 @@ def kutuphane_guncelle(jid, osm_baslik, parcalar):
     ana = [p for p in k.parts if p.name.startswith("Parca_") and p.tr.strip()]
     if not ana:
         raise ValueError("Kitapta metin parçası yok.")
-    db.insert_parts_hazir(jid, [(p.name, p.tr, p.osm or "") for p in k.parts])
+    eski = [(p["name"], p["tr"] or "", p["osm"] or "") for p in db.all_parts(jid)]
+    yeni = [(p.name, p.tr, p.osm or "") for p in k.parts]
+    if eski == yeni:
+        return True                          # tur 2/D: hiçbir şey değişmedi (ör. yalnız EPUB yeniden üretildi)
+    db.insert_parts_hazir(jid, yeni)
+    if [(a, b) for a, b, _ in eski] == [(a, b) for a, b, _ in yeni]:
+        # yalnız Osmanlıca değişti: ses yeniden üretilmez; iş bitmişse biçimler (PDF, DOCX, TXT, HTML) hemen yenilenir
+        if j["status"] == "done":
+            from .worker import save_outputs
+            try:
+                save_outputs(jid)
+            except Exception as e:
+                db.update(jid, note=f"Biçimler yenilenemedi: {str(e)[:200]}")
+        return True
     name = j["book_name"] or j["title"]
     parts_to_epub([{"tr": p.tr} for p in ana], name, db.source_path(jid, name + ".epub"))
     n = len(k.parts)

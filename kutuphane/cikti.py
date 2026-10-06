@@ -38,8 +38,17 @@ def ciktiya_yaz(kit, epublar, epub_klasoru, onceki=None):
     """EPUB'ları dil klasörlerine kopyalar. Döndürür: yazılan yollar (CIKTI'ye göre). Klasör bağlı değilse None.
     onceki: bir önceki yazımın yolları (kitap adı değiştiyse eski dosyalar kaldırılır)."""
     if not os.path.isdir(CIKTI):
-        return None
-    ad = dosya_adi(kit)
+        ust = os.path.dirname(CIKTI.rstrip("/"))
+        if ust != os.environ.get("DEDPLAY_DIR", "/dedplay").rstrip("/") or not os.path.isdir(ust):
+            return None                     # çıktı klasörü bağlı değil (konteynerin içine yazılmasın)
+        os.makedirs(CIKTI, exist_ok=True)   # /dedplay bağlı, EPUB klasörü henüz yok (tur 2/D)
+    temel = dosya_adi(kit)
+    ad, n = temel, 1
+    while any(os.path.exists(os.path.join(CIKTI, KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"])), ad + ".epub"))
+              and os.path.join(KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"])), ad + ".epub") not in (onceki or [])
+              for e in epublar):
+        n += 1                              # aynı adlı başka bir kitabın dosyası: üstüne yazma (tur 2/D)
+        ad = f"{temel} ({n})"
     yeni = []
     for e in epublar:
         klasor = KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"]))

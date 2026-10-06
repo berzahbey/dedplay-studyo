@@ -286,8 +286,9 @@ def studyoya_gonder(kid: str):
         raise HTTPException(409, "Kitap henüz hazır değil")
     if "tr" not in K.diller(kit):
         raise HTTPException(409, "Kitabın Türkçesi yok: önce Türkçeye çevrilmeli ('Türkçeye çevir ve Stüdyo'ya gönder')")
-    try:
-        sonuc = cikti.studyoya_gonder(kit)
+    try:   # tur 2/D: kitabın işi varsa o yenilenir (eskiden her seferinde yeni iş açılıyordu)
+        eski = (d.get("studyo") or {}).get("is")
+        sonuc = cikti.studyoyu_guncelle(kit, eski) if eski and cikti.studyo_isi_var(eski) else cikti.studyoya_gonder(kit)
     except requests.RequestException as e:
         raise HTTPException(503, f"Stüdyo'ya ulaşılamadı: {type(e).__name__}")
     except RuntimeError as e:

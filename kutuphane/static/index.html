@@ -100,7 +100,7 @@ details.fihrist summary { cursor: pointer; font: 600 1.05rem var(--serif); }
     <div class="mark" aria-hidden="true">ك</div>
     <div>
       <h1>Dedplay Stüdyo</h1>
-      <p class="lead">Kitabı ya da metni ver: metin onarılır, Osmanlıcaya çevrilir, Türkçe ve Osmanlıca EPUB'lar hazırlanır ve kendiliğinden seslendirilir. <a href="/studyo">Seslendirme durumu →</a></p>
+      <p class="lead">Kitabı ya da metni ver: metin onarılır, Osmanlıcaya çevrilir, Türkçe ve Osmanlıca EPUB'lar hazırlanır ve kendiliğinden seslendirilir. </p>
     </div>
   </header>
   <div class="services" id="servisler" aria-live="polite"></div>
@@ -271,6 +271,16 @@ $("#metinBtn").onclick = async () => {
 // ---- kitaplarım
 const arapHarfli = s => /[\u0600-\u06FF]/.test(s || "");
 const sureYaz = sn => { const sa = Math.floor(sn / 3600), dk = Math.round((sn % 3600) / 60); return sa ? `${sa} sa ${dk} dk` : `${Math.max(1, dk)} dk`; };
+let isler = {};   // Stüdyo işleri (seslendirme durumu), id -> iş
+function sesYazisi(j) {
+  if (!j) return null;
+  if (j.status === "error") return "Seslendirme hatası: " + (j.error || "");
+  if (j.status === "done" && j.ok_state === "bitti") return "Seslendirildi";
+  if (j.ok_state === "calisiyor") return `Seslendiriliyor${j.ok_total ? ` (${j.ok_done || 0}/${j.ok_total} bölüm)` : ""}`;
+  if (j.ok_state === "sirada") return "Seslendirme sırada";
+  if (j.ok_state === "bekliyor") return j.degisti ? "Düzeltildi: seslendirme yenilenecek" : "Seslendirme bekliyor";
+  return null;
+}
 function asamaYazisi(k) {
   if (k.asama === "hazır") return E("span", { class: "asama hazir" }, `Hazır, ${(k.epublar || []).length} EPUB`);
   if (k.asama === "hata") return E("span", { class: "asama hata" }, "Hata: " + (k.hata || ""));
@@ -279,6 +289,7 @@ function asamaYazisi(k) {
 async function kitaplar() {
   let liste;
   try { liste = await api("/api/kitaplar"); } catch (e) { return; }
+  try { isler = Object.fromEntries((await api("/api/jobs")).map(j => [j.id, j])); } catch (e) { isler = {}; }
   const ul = $("#kitaplar"); ul.replaceChildren();
   if (!liste.length) {
     ul.append(E("li", { class: "bos" }, "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
@@ -289,7 +300,8 @@ async function kitaplar() {
         arapHarfli(k.baslik_asil || k.baslik) ? E("div", { class: "ar", lang: "ar", dir: "rtl" }, k.baslik_asil || k.baslik)
                                               : E("div", { class: "tr-ad" }, k.baslik || k.kimlik),
         k.baslik && k.baslik_asil && k.baslik !== k.baslik_asil ? E("div", { class: "lat" }, k.baslik) : null,
-        E("div", { class: "meta" }, E("span", {}, k.yazar || ""), asamaYazisi(k)),
+        E("div", { class: "meta" }, E("span", {}, k.yazar || ""), asamaYazisi(k),
+          k.studyo && sesYazisi(isler[k.studyo.is]) ? E("span", { class: "asama" + (isler[k.studyo.is].ok_state === "bitti" ? " hazir" : "") }, " · " + sesYazisi(isler[k.studyo.is])) : null),
         k.uyari ? E("div", { class: "uyari" }, k.uyari) : null),
       E("div", { class: "sag" },
         (k.epublar || []).length ? E("a", { class: "btn", href: "/oku/" + encodeURIComponent(k.kimlik) }, "Oku") : null,
@@ -298,7 +310,7 @@ async function kitaplar() {
     ul.append(li);
     if (k.kimlik === acik) ayrinti(k.kimlik, li);
   }
-  const suruyor = liste.some(k => !["hazır", "hata"].includes(k.asama));
+  const suruyor = liste.some(k => !["hazır", "hata"].includes(k.asama)) || Object.values(isler).some(j => j.status === "active");
   clearTimeout(yoklama); if (suruyor) yoklama = setTimeout(kitaplar, 3000);
 }
 async function ayrinti(kid, li) {
@@ -343,23 +355,15 @@ async function ayrinti(kid, li) {
       E("p", { class: "meta" }, "Türkçe olmayan kitap (OpenITI vb.) yalnız kendi dilinde EPUB olarak kalır: çeviri, Osmanlıca ve seslendirme yapılmaz.")));
   }
   if (ep.length && d.diller?.includes("tr")) {
-    const st = d.durum.studyo;
-    const gonder = E("button", { class: "btn" + (st ? " ghost" : ""), type: "button" }, st ? "Seslendirmeye yeniden gönder" : "Seslendirmeye gönder");
-    const bilgi = E("p", { class: "meta", "aria-live": "polite" });
-    const stBag = n => E("a", { href: "/studyo", target: "_blank", rel: "noopener" }, `Seslendirme durumu (iş #${n})`);
-    if (st) bilgi.append(`Gönderildi: ${new Date(st.tarih * 1000).toLocaleString("tr-TR")} · `, stBag(st.is));
-    gonder.onclick = async () => {
-      if (st && !confirm("Bu kitap seslendirmeye daha önce gönderilmiş. Düzeltmelerle yeniden gönderilsin mi? (yeni bir seslendirme işi açılır)")) return;
-      gonder.disabled = true; bilgi.replaceChildren("Gönderiliyor…");
-      try { const v = await api(`/api/kitaplar/${encodeURIComponent(kid)}/studyo`, { method: "POST" });
-            bilgi.replaceChildren(`Gönderildi (${v.parca} parça). Seslendirme ve PDF, Word, HTML, TXT biçimleri üretilecek · `, stBag(v.is)); }
-      catch (e) { bilgi.replaceChildren(e.message); }
-      gonder.disabled = false;
-    };
+    // tur 2/D: seslendirme kendiliğinden (ekleyince ve her düzeltmeden sonra); elle gönderme düğmesi yok
+    const st = d.durum.studyo, j = st ? isler[st.is] : null;
+    const durum = E("p", { class: "meta" }, j ? sesYazisi(j) || "" : "Osmanlıca bitince seslendirmeye gidecek.");
+    const ad = j && (j.saved || j.book_name);
     kutu.append(E("div", {}, E("h3", {}, "Seslendirme ve öteki biçimler"),
-      E("p", { class: "meta" }, "Osmanlıca bitince kitap kendiliğinden seslendirmeye gider (Türkçe ve Osmanlıcası, düzeltmelerinle); PDF, Word, HTML ve TXT biçimleri de üretilir. Seslendirme kitap kitap sırayla yapılır."),
-      d.durum.studyo_uyari ? E("p", { class: "uyari" }, d.durum.studyo_uyari) : null,
-      E("div", { class: "alt" }, gonder), bilgi));
+      E("p", { class: "meta" }, "Kitap kendiliğinden seslendirilir; okuma ekranında düzeltme yapınca yalnız değişen bölümün sesi ve bütün biçimler yenilenir (son düzeltmeden 2 dakika sonra)."),
+      d.durum.studyo_uyari ? E("p", { class: "uyari" }, d.durum.studyo_uyari) : null, durum,
+      ad ? E("p", { class: "meta" }, `Çıktılar: /media/ZimaOS-HD/dedplay → EPUB, PDF, DOCX, TXT, HTML (Türkçe, Osmanlıca, Türkçe-Osmanlıca), MP3, M4B · dosya adı: "${ad}"`) : null,
+      j && j.ok_state === "bitti" ? E("audio", { controls: "", preload: "none", src: `/api/jobs/${j.id}/audio`, style: "width:100%" }) : null));
   }
   if (d.fihrist?.length) {
     const ol = E("ol");

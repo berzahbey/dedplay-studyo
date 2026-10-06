@@ -74,7 +74,8 @@ clients.ok_library_entry = lambda ad: {"title": ad, "m4b": "/x.m4b"}
 w.step_okuma(db.get(jid), "")
 ok(db.get(jid)["ok_state"] == "calisiyor", "işlenirken eski M4B bitti sayılmaz")
 # seslendirme sürerken yeni düzeltme -> bitince bir kez daha
-studyo.kutuphane_guncelle(jid, "اثر", yeni)
+yeni2 = [dict(parcalar[0]), dict(parcalar[1], tr="İkinci Bölüm\nBir kez daha düzeltildi.")]   # 2/D: aynı metin yenileme yapmaz
+studyo.kutuphane_guncelle(jid, "اثر", yeni2)
 ok(db.get(jid)["yenile"] == 1 and db.get(jid)["ok_state"] == "calisiyor", "seslendirme sürerken düzeltme: işaretlendi")
 clients.ok_status = lambda ad: ("completed", 2, 2)
 w.step_okuma(db.get(jid), "")

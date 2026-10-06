@@ -49,6 +49,10 @@ def init():
             c.execute("ALTER TABLE jobs ADD COLUMN saved TEXT")
         if "auto_title" not in cols:
             c.execute("ALTER TABLE jobs ADD COLUMN auto_title INTEGER DEFAULT 0")
+        if "degisti" not in cols:  # tur 2/C: son düzeltme zamanı (art arda düzeltmede bekleme)
+            c.execute("ALTER TABLE jobs ADD COLUMN degisti REAL")
+        if "yenile" not in cols:   # tur 2/C: seslendirme sürerken kitap düzeltildi -> bitince yeniden gönderilir
+            c.execute("ALTER TABLE jobs ADD COLUMN yenile INTEGER DEFAULT 0")
 
 
 def job_dir(job_id):

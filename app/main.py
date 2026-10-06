@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import shutil
 from urllib.parse import quote
 
@@ -176,7 +177,7 @@ def kutuphane_isi(baslik, osm_baslik, parcalar):
     if not ana:
         raise ValueError("Kitapta metin parçası yok.")
     title = _re.sub("[" + _re.escape(chr(92) + "/:*?" + chr(34) + "<>|") + "]+", " ", k.title or "")
-    title = _re.sub(r"\s+", " ", title).strip(" .")[:80] or "Kütüphane kitabı"
+    title = _re.sub(r"\s+", " ", title).strip(" .")[:120] or "Kütüphane kitabı"   # EPUB adıyla aynı uzunluk
     name = title + ".epub"
     jid = db.create_job(name, "tr")
     hazir_osm = any(p.osm.strip() for p in k.parts)  # Osmanlıca gelmediyse Stüdyo kendisi çevirir
@@ -191,6 +192,33 @@ def kutuphane_isi(baslik, osm_baslik, parcalar):
               osm_title=(k.osm_title or "").strip() or None,
               note="Dedplay Kütüphane'den geldi", status="active")
     return jid
+
+
+def kutuphane_guncelle(jid, osm_baslik, parcalar):
+    """Tur 2/C: kitap okuma ekranında düzeltildi -> Stüdyo işinin parçaları yenilenir ve kitap yeniden seslendirmeye gider
+    (Kitap Okuma yalnız metni değişen bölümleri yeniden okur). Seslendirme sürüyorsa bitince bir kez daha gönderilir.
+    Döndürür: True (güncellendi) / False (iş yok)."""
+    from .worker import parts_to_epub
+    j = db.get(jid)
+    if not j:
+        return False
+    k = KutuphaneKitap(title=j["title"] or "", osm_title=osm_baslik or "", parts=parcalar)
+    ana = [p for p in k.parts if p.name.startswith("Parca_") and p.tr.strip()]
+    if not ana:
+        raise ValueError("Kitapta metin parçası yok.")
+    db.insert_parts_hazir(jid, [(p.name, p.tr, p.osm or "") for p in k.parts])
+    name = j["book_name"] or j["title"]
+    parts_to_epub([{"tr": p.tr} for p in ana], name, db.source_path(jid, name + ".epub"))
+    n = len(k.parts)
+    upd = dict(osm_state="bitti", osm_done=n, osm_total=n, status="active", stage="produce", error=None,
+               note="Kütüphane'de düzeltildi: yenileniyor", osm_title=(k.osm_title or "").strip() or j["osm_title"])
+    if j["ok_state"] in ("sirada", "calisiyor") and j["status"] == "active":
+        upd["yenile"] = 1                      # şu anki seslendirme bitince yeniden gönderilir
+    else:
+        upd["ok_state"] = "bekliyor"
+    upd["degisti"] = time.time()   # art arda düzeltmelerde seslendirme ancak 2 dakika sessizlikten sonra başlar
+    db.update(jid, **upd)
+    return True
 
 
 @app.post("/api/jobs/{job_id}/resume")

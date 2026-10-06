@@ -47,7 +47,11 @@ def parts_to_epub(parts, title, out_path):
     for i, p in enumerate(parts, 1):
         ch = epub.EpubHtml(title=f"{i}", file_name=f"b{i:04d}.xhtml", lang="tr")
         satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for x in p["tr"].split("\n")]  # ayet/madde no okunmaz
-        ch.content = "<html><body>" + "".join(f"<p>{_html.escape(x)}</p>" for x in satirlar if x.strip()) + "</body></html>"
+        satirlar = [x for x in satirlar if x.strip()]
+        # tur 2/C: parçanın ilk satırı (bölüm başlığı) <h1>: Kitap Okuma M4B bölüm adını buradan alır (Bolum_001 yerine)
+        bas = f"<h1>{_html.escape(satirlar[0])}</h1>" if satirlar and len(satirlar[0]) <= 120 else ""
+        govde = satirlar[1:] if bas else satirlar
+        ch.content = "<html><body>" + bas + "".join(f"<p>{_html.escape(x)}</p>" for x in govde) + "</body></html>"
         book.add_item(ch)
         bolumler.append(ch)
     book.add_item(epub.EpubNcx())
@@ -165,6 +169,8 @@ class Worker(threading.Thread):
         jid, name, state = j["id"], j["book_name"], j["ok_state"]
         if state == "bitti":
             return
+        if state == "bekliyor" and j["degisti"] and time.time() - j["degisti"] < DUZELTME_BEKLEME:
+            return  # tur 2/C: kitap az önce düzeltildi; art arda düzeltmeler bitsin (her biri için M4B yeniden kurulmasın)
         if state == "bekliyor" and _baska_seslendirme_var(jid):
             return  # tur 2/A: kitaplar kendiliğinden geldiği için seslendirme tek tek (sayı tur 4'te ölçülerek)
         if state == "bekliyor":
@@ -198,6 +204,7 @@ class Worker(threading.Thread):
             elif state != "hata":
                 upd["ok_state"] = "calisiyor" if "process" in low or "işlen" in low else "sirada"
         entry = clients.ok_library_entry(name)
+        isleniyor = bool(status) and not any(k in status.lower() for k in ("complet", "bitti", "error", "hata"))
         # Bekçi: seslendirme sürüyor görünüp Kitap Okuma'nın listesinde hiç yoksa (Kitap Okuma yeniden
         # başladıysa yarım kalan işi unutur) ~1 dakika sonra yeniden gönder; kaldığı yerden devam eder.
         if not status and not entry and state in ("sirada", "calisiyor"):
@@ -209,8 +216,10 @@ class Worker(threading.Thread):
                 return
         else:
             self.kayip.pop(jid, None)
-        if entry:
+        if entry and not isleniyor:   # yeniden gönderilen kitapta eski M4B'yi "bitti" sanma (tur 2/C)
             upd.update(ok_state="bitti", audio=json.dumps(entry, ensure_ascii=False))
+            if j["yenile"]:            # seslendirme sürerken kitap düzeltilmişti: bir kez daha gönder
+                upd.update(ok_state="bekliyor", yenile=0)
             if upd.get("ok_total") or j["ok_total"]:
                 upd["ok_done"] = upd.get("ok_total") or j["ok_total"]
         if upd:
@@ -304,6 +313,52 @@ def _ocr_ile_dil(path):
     return None
 
 
+DEDPLAY_DIR = os.environ.get("DEDPLAY_DIR", "/dedplay")
+DUZELTME_BEKLEME = int(os.environ.get("DUZELTME_BEKLEME", "120"))   # saniye
+DIL_KLASORU = {"tr": "Türkçe", "osm": "Osmanlıca", "iki": "Türkçe-Osmanlıca"}
+BICIM_KLASORU = {"pdf": "PDF", "docx": "DOCX", "txt": "TXT", "html": "HTML"}   # EPUB'ları Kütüphane yazar
+
+
+def save_outputs_yeni(j, parts, name):
+    """Tur 3: /dedplay altında biçim/dil/kitap adı düzeni:
+    PDF/Türkçe/Kitap.pdf, PDF/Osmanlıca/…, PDF/Türkçe-Osmanlıca/… (DOCX, TXT, HTML aynı); MP3/Kitap/Kitap - 001.mp3;
+    M4B/Kitap.m4b (büyük kitapta Kitap - 1.m4b, - 2…). Kitap Okuma'nın kendi dosyaları yerinde kalır (düzeltmede yalnız
+    değişen bölüm yeniden okunsun diye)."""
+    from .export import build
+    for fmt, bk in BICIM_KLASORU.items():
+        for variant, dk in DIL_KLASORU.items():
+            data, _, _ = build(j, parts, fmt, variant)
+            d = os.path.join(DEDPLAY_DIR, bk, dk)
+            os.makedirs(d, exist_ok=True)
+            hedef = os.path.join(d, f"{name}.{fmt}")
+            with open(hedef + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(hedef + ".tmp", hedef)
+    kaynak = os.path.join(OUTPUT_DIR, j["book_name"] or name)
+    mp3s = sorted(glob.glob(os.path.join(glob.escape(kaynak), "Parca_*.mp3")) +
+                  glob.glob(os.path.join(glob.escape(kaynak), "Bolum_*.mp3")), key=_natural)
+    if mp3s:
+        mdir = os.path.join(DEDPLAY_DIR, "MP3", name)
+        shutil.rmtree(mdir, ignore_errors=True)
+        os.makedirs(mdir)
+        width = max(3, len(str(len(mp3s))))
+        for n, src in enumerate(mp3s, 1):
+            dst = os.path.join(mdir, f"{name} - {n:0{width}d}.mp3")
+            shutil.copy2(src, dst)
+            _tag_mp3(dst, name, n, len(mp3s), width)
+    m4bs = sorted(glob.glob(os.path.join(glob.escape(kaynak), "*.m4b")), key=_natural)
+    if m4bs:
+        md = os.path.join(DEDPLAY_DIR, "M4B")
+        os.makedirs(md, exist_ok=True)
+        for eski in glob.glob(os.path.join(glob.escape(md), glob.escape(name) + "*.m4b")):
+            if os.path.basename(eski) == name + ".m4b" or re.fullmatch(re.escape(name) + r" - \d+\.m4b", os.path.basename(eski)):
+                os.remove(eski)
+        for i, src in enumerate(m4bs, 1):
+            hedef = os.path.join(md, f"{name}.m4b" if len(m4bs) == 1 else f"{name} - {i}.m4b")
+            shutil.copy2(src, hedef + ".tmp")
+            os.replace(hedef + ".tmp", hedef)
+
+
 def save_outputs(job_id):
     """Biten kitabın dosyalarını çıktı klasörüne kaydeder: M4B kitap klasörünün üstünde kalır,
     diğer dosyalar biçimlerine göre alt klasörlere (EPUB, PDF, Word, HTML, TXT) ayrılır."""
@@ -324,6 +379,10 @@ def save_outputs(job_id):
     if not parts:
         raise RuntimeError("Metin parçaları yok.")
     name = (j["book_name"] or j["title"]).replace("/", "-")
+    if os.path.isdir(DEDPLAY_DIR):          # tur 3: yeni çıktı düzeni
+        save_outputs_yeni(j, parts, name)
+        db.update(job_id, saved=name, note=None)
+        return name
     folder = os.path.join(OUTPUT_DIR, name)
     os.makedirs(folder, exist_ok=True)
     subdir = {"epub": "EPUB", "pdf": "PDF", "docx": "Word", "html": "HTML", "txt": "TXT"}

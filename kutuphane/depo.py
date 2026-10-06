@@ -200,7 +200,7 @@ def _osmanlica(kid, zorla=False):
         durum_yaz(kid, uyari=f"Osmanlıca çevrilemedi ({type(e).__name__}: {str(e)[:120]}); sadece Türkçe üretildi")
 
 
-def _studyoya_zincirle(kid):
+def _studyoya_zincirle(kid, guncelle=False, yalniz_var_olan=False):
     """Tur 2/A: Osmanlıca ve EPUB'lar bitince Türkçe kitap kendiliğinden Stüdyo'ya gider (seslendirme ve öteki biçimler).
     Kitabın Stüdyo işi zaten varsa yeni iş açılmaz (düzeltmeden sonra yenileme tur 2/C). Osmanlıca çevrilemediyse
     gönderilmez: Stüdyo Osmanlıcayı ikinci kez çevirmesin; 'Osmanlıcayı yeniden çevir' başarılı olunca gider."""
@@ -214,6 +214,14 @@ def _studyoya_zincirle(kid):
         return
     eski = (d.get("studyo") or {}).get("is")
     if eski and cikti.studyo_isi_var(eski):
+        if guncelle:   # tur 2/C: var olan iş yeni metinle yenilenir (yalnız değişen bölümlerin sesi yeniden üretilir)
+            try:
+                durum_yaz(kid, studyo=cikti.studyoyu_guncelle(kit, eski), studyo_uyari=None)
+            except Exception as e:
+                traceback.print_exc()
+                durum_yaz(kid, studyo_uyari=f"Seslendirme yenilenemedi: {type(e).__name__}: {str(e)[:150]}")
+        return
+    if yalniz_var_olan:
         return
     try:
         durum_yaz(kid, studyo=cikti.studyoya_gonder(kit), studyo_uyari=None)
@@ -282,7 +290,9 @@ def _isle(tur, kid, arg):
                             durum_yaz(kid, uyari=f"Künyenin Osmanlıcası çevrilemedi: {type(e).__name__}")
             epub_uret(kid)
             if tur == "osmanlica":  # tur 2/A: Osmanlıca ve EPUB'lar hazır -> kendiliğinden Stüdyo
-                _studyoya_zincirle(kid)
+                _studyoya_zincirle(kid, guncelle=True)
+            elif tur in ("epub", "kunye"):  # tur 2/C: okuma ekranında düzeltme -> Stüdyo işi (ses ve biçimler) yenilenir
+                _studyoya_zincirle(kid, guncelle=True, yalniz_var_olan=True)
             # 1. aşama bitti: kitap kendi dilinde Kütüphane'de. 2. aşama: Türkçeyse Osmanlıca (çeviri yok; OpenITI yalnız Arapça EPUB)
             if tur == "dosya":
                 kit = K.yukle(kitap_yolu(kid))

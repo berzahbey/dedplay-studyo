@@ -112,12 +112,22 @@ def studyoya_gonder(kit):
     ku = kit["kunye"]
     baslik = ku["baslik"].get("tr") or ku["baslik"].get(ku.get("asil_dil", "tr")) or "Kitap"
     parcalar = studyo_parcalari(kit)
-    try:
-        jid = studyo.kutuphane_isi(re.sub(r"\s+", " ", _YASAK.sub(" ", baslik)).strip(" ."),
-                                   (ku["baslik"].get("osm") or "").strip(), parcalar)
+    try:   # tur 3: dosya adları bütün biçimlerde aynı ("Eser adı - Yazar"), EPUB'larla birlikte
+        jid = studyo.kutuphane_isi(dosya_adi(kit), (ku["baslik"].get("osm") or "").strip(), parcalar)
     except ValueError as e:
         raise RuntimeError(f"Stüdyo kabul etmedi: {e}")
     return {"is": jid, "tarih": int(time.time()), "parca": len(parcalar)}
+
+
+def studyoyu_guncelle(kit, jid):
+    """Tur 2/C: kitabın mevcut Stüdyo işini yeni metinle yeniler (düzeltmeden sonra)."""
+    from app import main as studyo
+    parcalar = studyo_parcalari(kit)
+    try:
+        ok = studyo.kutuphane_guncelle(int(jid), (kit["kunye"]["baslik"].get("osm") or "").strip(), parcalar)
+    except ValueError as e:
+        raise RuntimeError(f"Stüdyo kabul etmedi: {e}")
+    return {"is": int(jid), "tarih": int(time.time()), "parca": len(parcalar), "guncellendi": bool(ok)}
 
 
 def studyo_isi_var(jid):

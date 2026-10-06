@@ -60,6 +60,7 @@ def _new_job(name, lang):
 
 @app.post("/api/jobs")
 def create_job(file: UploadFile = File(...), lang: str = Form("auto")):
+    raise HTTPException(410, "Kitaplar artık ana ekrandan eklenir (Kitap ekle): Stüdyo'nun ayrı ekleme yolu kalktı (tur 2/B).")
     name = os.path.basename(file.filename or "kitap")
     jid = _new_job(name, lang)
     with open(db.source_path(jid, name), "wb") as f:
@@ -105,6 +106,7 @@ class ServerFile(BaseModel):
 
 @app.post("/api/jobs/from-server")
 def job_from_server(f: ServerFile):
+    raise HTTPException(410, "Kitaplar artık ana ekrandan eklenir (Kitap ekle): Stüdyo'nun ayrı ekleme yolu kalktı (tur 2/B).")
     p = _safe(f.path)
     if not os.path.isfile(p):
         raise HTTPException(404, "Dosya bulunamadı")
@@ -123,6 +125,7 @@ class PastedText(BaseModel):
 
 @app.post("/api/jobs/from-text")
 def job_from_text(t: PastedText):
+    raise HTTPException(410, "Kitaplar artık ana ekrandan eklenir (Kitap ekle): Stüdyo'nun ayrı ekleme yolu kalktı (tur 2/B).")
     import re as _re
     import time as _time
     text = (t.text or "").strip()
@@ -198,6 +201,7 @@ def resume_job(job_id: int):
 
 @app.post("/api/jobs/{job_id}/redo-osm")
 def redo_osm(job_id: int):
+    raise HTTPException(410, "Osmanlıca tek yerde yapılır: ana ekranda kitabı açıp 'Osmanlıcayı yeniden çevir' (tur 2/B).")
     j = db.get(job_id)
     if not j or not db.all_parts(job_id):
         raise HTTPException(409, "Bu kitabın metin parçaları yok.")

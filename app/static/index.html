@@ -212,7 +212,7 @@ function jobHTML(j) {
     ${dl ? `<div class="dl">${dl}</div>` : ""}
     <div class="actions">
       ${canResume ? `<button data-a="resume">Devam et</button>` : ""}
-      ${j.status === "done" && j.osm_total ? `<button data-a="redo">Osmanlıcayı yeniden çevir</button>` : ""}
+      ${""/* Osmanlıca tek yerde: ana ekrandan yenilenir (tur 2/B) */}
       ${j.status === "done" ? `<button data-a="save">${j.saved ? "Çıktı klasörüne yeniden kaydet" : "Çıktı klasörüne kaydet"}</button>` : ""}
       <button class="link danger" data-a="del">Sil</button>
     </div></li>`;

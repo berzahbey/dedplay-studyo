@@ -2694,7 +2694,54 @@ def _konumlar(metin):
     return duz, [(e, max(0, min(len(duz), k - sol))) for e, k in sayfalar]
 
 
-def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False):
+_ARAP_HARF = re.compile(r"[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]")
+_DIL_KELIME = {
+    "tr": {"ve", "bir", "bu", "ile", "için", "olan", "olarak", "da", "de", "ki", "gibi", "daha", "çok", "ise", "değil", "kadar",
+           "sonra", "onun", "bütün", "her"},
+    "en": {"the", "and", "of", "to", "in", "is", "that", "it", "was", "for", "with", "as", "his", "which", "by"},
+    "fr": {"le", "la", "les", "et", "des", "du", "un", "une", "est", "que", "dans", "pour", "qui", "pas", "au"},
+}
+
+
+def metin_dili(metinler):
+    """Kitabın dili (tur 2/B): 'tr', 'ar', 'en', 'fr'. Arap harfleri harflerin yarısından çoksa 'ar' (Arapça, Farsça ya da
+    Arap harfli Osmanlıca kaynak: hepsi yalnız kendi dilinde EPUB olur). Türkçe kitaptaki âyet ve Arapça ibareler kitabı
+    Arapça yapmaz. Karar verilemezse (çok kısa metin) 'tr'."""
+    t = SAYFA_ISARET.sub(" ", " ".join(metinler))[:200000]
+    harfler = re.findall(r"[^\W\d_]", t)
+    if len(harfler) < 40:
+        return "tr"
+    if len(_ARAP_HARF.findall(t)) / len(harfler) > 0.5:
+        return "ar"
+    kel = re.findall(r"[^\W\d_]+", t.lower())
+    if not kel:
+        return "tr"
+    puan = {d: sum(1 for w in kel if w in v) / len(kel) for d, v in _DIL_KELIME.items()}
+    puan["tr"] += len(re.findall(r"[çğışöü]", t.lower())) / len(kel) * 0.5
+    en_iyi = max(puan, key=puan.get)
+    return en_iyi if puan[en_iyi] > 0.02 else "tr"
+
+
+def _dile_tasi(kit, dil):
+    """Türkçe sanılarak kurulan kitabın metinlerini asıl diline taşır (bloklar, dipnotlar, künye)."""
+    for b in kit["bloklar"]:
+        if "tr" in b["metin"]:
+            b["metin"][dil] = b["metin"].pop("tr")
+        for s in b.get("sayfalar", []):
+            if "tr" in s.get("konum", {}):
+                s["konum"][dil] = s["konum"].pop("tr")
+    for n in kit.get("dipnotlar", {}).values():
+        if "tr" in n["metin"]:
+            n["metin"][dil] = n["metin"].pop("tr")
+    for alan in ("baslik", "yazar"):
+        a = kit["kunye"].get(alan, {})
+        if "tr" in a:
+            a[dil] = a.pop("tr")
+    kit["kunye"]["asil_dil"] = dil
+    return kit
+
+
+def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     ogeler = _basliklari_denetle(ogeler)
     _seviyeler(ogeler)
     # 0.5.14: "A — ZAMAN", "B — İRTİKÂ", "C - RIZIK": harfle numaralı ara başlıklar aynı seviyede (yazı boyu tahmini
@@ -2721,6 +2768,8 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False):
     ogeler = birlesik
     # metni zaten olan kaynakta (EPUB/DOCX/TXT) yalnız gereken onarım yapılır; hatasız kitap bozulmaz
     onar = onarim_gereksinimi([o["metin"] for o in ogeler]) if metin_kaynagi else TUM_ONARIMLAR
+    if dil != "tr":   # Türkçe kelime onarımları (Zemberek) yabancı dilde metni bozar
+        onar = {"tire": False, "bolunmus": False, "harf": False}
     kunye.setdefault("cikarma", {})["onarim"] = onar
     duz = _duzelt([o["metin"] for o in ogeler], onar)
     notlar = dict(zip(notlar, _duzelt(list(notlar.values()), onar))) if notlar else {}
@@ -2999,7 +3048,10 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
         "cikarma": {k: bilgi.get(k) for k in ("sayfa", "ocr", "bozuk_katman")},
         "yapi": bilgi.get("yapi"),  # "fihrist": başlıklar kitabın kendi fihristinden (EPUB) ya da yer imlerinden (PDF)
     }
-    kit = kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=uzanti in (".epub", ".docx", ".txt"))
+    dil = metin_dili([o["metin"] for o in ogeler])   # tur 2/B: Türkçe olmayan kitap yalnız kendi dilinde EPUB olur
+    kit = kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=uzanti in (".epub", ".docx", ".txt"), dil=dil)
+    if dil != "tr":
+        _dile_tasi(kit, dil)
     if kapak_yolu and bilgi.get("kapak_resmi"):
         veri, tur = bilgi["kapak_resmi"]
         uz = ".png" if "png" in tur else ".jpg"

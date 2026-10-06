@@ -2633,21 +2633,45 @@ def _basliklari_birlestir(ogeler):
     return out
 
 
-def _duzelt(metinler):
-    """Stüdyo düzeltmeleri (sayfa atıfları KORUNUR: kitabın basılı sayfa numaraları EPUB'da var)."""
+TUM_ONARIMLAR = {"tire": True, "bolunmus": True, "harf": True}
+
+
+def onarim_gereksinimi(metinler):
+    """Metni zaten olan kaynak (EPUB/DOCX/TXT/yapıştırılan metin) için hangi OCR onarımlarına gerçekten ihtiyaç var?
+    Hatasız bir kitap bozulmasın (Zahir'in kuralı: orijinale sadakat): onarım yalnız metinde o bozukluğun izi varsa yapılır.
+    - tire: satır sonu hecelemesi (kelime- devam) 10 bin kelimede 50'den fazlaysa (Risale'deki "gider- fiilinde" gibi
+      tire-boşluk kullanımı ve Vâcib-ül, mana-yı gibi tireli yazımlar korunur)
+    - bolunmus: ğ ile başlayan kelime parçası ("oldu ğundan") 10 bin kelimede 3'ten fazlaysa ("bir şey" ayrı kalır)
+    - harf: Zemberek'e göre geçersiz kelime oranı %30'dan fazlaysa (bürhan, nümune, mu'cize gibi eski imlâ korunur)"""
+    t = SAYFA_ISARET.sub(" ", " ".join(metinler))
+    kel = re.findall(r"[^\W\d_]{2,}", t)
+    n = max(1, len(kel))
+    tire = len(re.findall(r"[^\W\d_]-\s+[a-zçğıöşüâîû]", t)) * 1e4 / n
+    bolunmus = len(re.findall(r"(?<![^\W\d_])[ğĞ][^\W\d_]", t)) * 1e4 / n
+    orn = kel[:: max(1, len(kel) // 3000)][:3000]
+    gecersiz = (sum(1 for k in orn if not (DZ.gecerli_mi(k.lower()) or DZ._kelime_mi(k.lower()))) / len(orn)) if orn else 0
+    return {"tire": tire >= 50, "bolunmus": bolunmus >= 3, "harf": gecersiz > 0.30}
+
+
+def _duzelt(metinler, onar=None):
+    """Stüdyo düzeltmeleri (sayfa atıfları KORUNUR: kitabın basılı sayfa numaraları EPUB'da var).
+    onar: hangi kelime onarımları yapılsın (PDF'te hepsi; metin kaynağında onarim_gereksinimi'ne göre)."""
+    onar = onar or TUM_ONARIMLAR
     basliklar = DZ.satir_ici_ust_bilgileri_bul([SAYFA_ISARET.sub(" ", t) for t in metinler])
     out = []
     for p in metinler:
         p = DZ.satir_ici_ust_bilgileri_sil(p, basliklar)
         p = DZ.cop_isaretleri_sil(p)
-        p = re.sub(r"(?<=[^\W\d_])-\s*(\ue002[^\ue003]{1,20}\ue003)\s*(?=[a-zçğıöşüâîû])", r"\1", p)  # 0.5.13
-        p = DZ.satir_ici_tireleri_birlestir(p)
-        if hasattr(DZ, "bolunmus_kelimeleri_birlestir"):  # "oldu ğundan" -> "olduğundan" (Stüdyo'nun onarımı)
+        if onar["tire"]:
+            p = re.sub(r"(?<=[^\W\d_])-\s*(\ue002[^\ue003]{1,20}\ue003)\s*(?=[a-zçğıöşüâîû])", r"\1", p)  # 0.5.13
+            p = DZ.satir_ici_tireleri_birlestir(p)
+        if onar["bolunmus"] and hasattr(DZ, "bolunmus_kelimeleri_birlestir"):  # "oldu ğundan" -> "olduğundan"
             p = DZ.bolunmus_kelimeleri_birlestir(p)
         p = re.sub(r"(?<=[^\W\d_])\s+([’'])\s*(?=[^\W\d_])", r"\1", p)  # Nasır ’ ın -> Nasır’ın
         p = re.sub(r"\(\s*(\{\{n\d{4,}\}\})\s*\)", r"\1", p)         # ( {{n0002}} ) -> {{n0002}}
         p = re.sub(r"\s*\(\s*\)", "", p)                                  # silinen numaradan kalan "()"
-        p = DZ.harfleri_onar(p)
+        if onar["harf"]:
+            p = DZ.harfleri_onar(p)
         p = re.sub(r"[ \t]{2,}", " ", p).replace(" ,", ",").replace(" .", ".").strip()
         p = re.sub(r"^(\d{1,3}[.)])(?=[^\s\d.)\ue002])", r"\1 ", p)
         out.append(p)
@@ -2670,7 +2694,7 @@ def _konumlar(metin):
     return duz, [(e, max(0, min(len(duz), k - sol))) for e, k in sayfalar]
 
 
-def kitaba_cevir(ogeler, notlar, kunye):
+def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False):
     ogeler = _basliklari_denetle(ogeler)
     _seviyeler(ogeler)
     # 0.5.14: "A — ZAMAN", "B — İRTİKÂ", "C - RIZIK": harfle numaralı ara başlıklar aynı seviyede (yazı boyu tahmini
@@ -2695,8 +2719,11 @@ def kitaba_cevir(ogeler, notlar, kunye):
             bekleyen = None
         birlesik.append(o)
     ogeler = birlesik
-    duz = _duzelt([o["metin"] for o in ogeler])
-    notlar = dict(zip(notlar, _duzelt(list(notlar.values())))) if notlar else {}
+    # metni zaten olan kaynakta (EPUB/DOCX/TXT) yalnız gereken onarım yapılır; hatasız kitap bozulmaz
+    onar = onarim_gereksinimi([o["metin"] for o in ogeler]) if metin_kaynagi else TUM_ONARIMLAR
+    kunye.setdefault("cikarma", {})["onarim"] = onar
+    duz = _duzelt([o["metin"] for o in ogeler], onar)
+    notlar = dict(zip(notlar, _duzelt(list(notlar.values()), onar))) if notlar else {}
     kit = K.yeni(kunye)
     tasinan = []  # atılan paragraftaki sayfa işaretleri sonrakine geçer
     for o, metin in zip(ogeler, duz):
@@ -2708,7 +2735,8 @@ def kitaba_cevir(ogeler, notlar, kunye):
         sayfa = [{"no": e, "konum": {"tr": 0}} for e in tasinan] + [{"no": e, "konum": {"tr": k}} for e, k in sayfalar]
         tasinan = []
         if o["tur"] == "baslik":
-            temiz2 = temiz if o.get("fihrist") and not o.get("onar") else turkce_onar(_buyuk_baslik_onar(temiz))  # kitabın kendi fihristindeki yazı zaten temiz
+            temiz2 = temiz if (o.get("fihrist") and not o.get("onar")) or not onar["harf"] \
+                else turkce_onar(_buyuk_baslik_onar(temiz))  # kitabın kendi fihristindeki / temiz kaynaktaki yazı zaten doğru
             if len(temiz2) == len(temiz):  # uzunluk aynı kalır (harf değişimi): sayfa konumları geçerli
                 temiz = temiz2
             K.blok_ekle(kit, "baslik", {"tr": temiz}, seviye=o.get("seviye", 1), sayfalar=sayfa)
@@ -2971,7 +2999,7 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
         "cikarma": {k: bilgi.get(k) for k in ("sayfa", "ocr", "bozuk_katman")},
         "yapi": bilgi.get("yapi"),  # "fihrist": başlıklar kitabın kendi fihristinden (EPUB) ya da yer imlerinden (PDF)
     }
-    kit = kitaba_cevir(ogeler, notlar, kunye)
+    kit = kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=uzanti in (".epub", ".docx", ".txt"))
     if kapak_yolu and bilgi.get("kapak_resmi"):
         veri, tur = bilgi["kapak_resmi"]
         uz = ".png" if "png" in tur else ".jpg"

@@ -63,5 +63,26 @@ ok(y1b == y1, "aynı kitabın yeniden yazımı aynı adı kullanır")
 y2 = cikti.ciktiya_yaz(kit, [{"dosya": "a.epub", "diller": ["tr"]}], ep)
 ok(y2 == [os.path.join("Türkçe", "Eser - Yazar (2).epub")], f"aynı adlı başka kitap (2) ile yazılır {y2}")
 
+# dinleme: M4B audio/mp4, satır içi, Range ile parça parça
+from starlette.requests import Request
+os.makedirs(os.path.join(kok, "dedplay", "M4B"), exist_ok=True)
+open(os.path.join(kok, "dedplay", "M4B", "Aynı Ad.m4b"), "wb").write(b"0123456789")
+db.update(j1, saved="Aynı Ad")
+def istek(range_=None):
+    h = [(b"range", range_.encode())] if range_ else []
+    return Request({"type": "http", "headers": h, "method": "GET", "path": "/"})
+def govde(r):
+    import asyncio
+    async def topla():
+        return b"".join([c async for c in r.body_iterator])
+    return asyncio.run(topla())
+r = studyo.dinle(j1, istek())
+ok(r.status_code == 200 and r.media_type == "audio/mp4" and r.headers["accept-ranges"] == "bytes"
+   and r.headers["content-disposition"].startswith("inline") and govde(r) == b"0123456789", "dinleme: audio/mp4, satır içi")
+r = studyo.dinle(j1, istek("bytes=2-5"))
+ok(r.status_code == 206 and r.headers["content-range"] == "bytes 2-5/10" and govde(r) == b"2345", "dinleme: ileri sarma (Range 206)")
+ok(studyo.dinle_parcalar(j1) == {"parca": 1} and 'dinle?part=' in open(os.path.join(kod, "index.html"), encoding="utf-8").read(),
+   "ana ekrandaki çalar yeni adresi kullanır")
+
 print("SONUC:", "HEPSI GECTI" if all(B) else f"{B.count(False)} TEST KALDI")
 sys.exit(0 if all(B) else 1)

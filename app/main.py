@@ -4,7 +4,7 @@ import time
 import shutil
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -305,6 +305,68 @@ def audio(job_id: int, part: int = 0):
     if r.headers.get("content-length"):
         headers["Content-Length"] = r.headers["content-length"]
     return StreamingResponse(r.iter_content(1 << 16), media_type="application/octet-stream", headers=headers)
+
+
+def _m4b_dosyalari(j):
+    """Kitabın /dedplay/M4B altındaki ses dosyaları (tur 3 düzeni): Ad.m4b ya da Ad - 1.m4b, Ad - 2.m4b…"""
+    import glob
+    import re as _re
+    ad = j["saved"] or j["book_name"] or j["title"] or ""
+    md = os.path.join(os.environ.get("DEDPLAY_DIR", "/dedplay"), "M4B")
+    tek = os.path.join(md, ad + ".m4b")
+    if os.path.isfile(tek):
+        return [tek]
+    parca = [p for p in glob.glob(os.path.join(glob.escape(md), glob.escape(ad) + " - *.m4b"))
+             if _re.fullmatch(_re.escape(ad) + r" - \d+\.m4b", os.path.basename(p))]
+    return sorted(parca, key=lambda p: int(_re.search(r" - (\d+)\.m4b$", p).group(1)))
+
+
+@app.get("/api/jobs/{job_id}/dinle")
+def dinle(job_id: int, request: Request, part: int = 0):
+    """Tarayıcıda dinleme (tur 2/D): M4B audio/mp4 olarak, satır içi ve parça parça (Range) verilir; ileri/geri sarılabilir."""
+    j = db.get(job_id)
+    if not j:
+        raise HTTPException(404, "Böyle bir iş yok.")
+    dosyalar = _m4b_dosyalari(j)
+    if part >= len(dosyalar):
+        raise HTTPException(404, "Ses dosyası bulunamadı (seslendirme henüz bitmemiş olabilir).")
+    yol = dosyalar[part]
+    boyut = os.path.getsize(yol)
+    bas, son, kod = 0, boyut - 1, 200
+    import re as _re
+    m = _re.match(r"bytes=(\d*)-(\d*)", request.headers.get("range", ""))
+    if m and (m.group(1) or m.group(2)):
+        if m.group(1):
+            bas = int(m.group(1))
+            son = int(m.group(2)) if m.group(2) else boyut - 1
+        else:                                   # son n bayt
+            bas = max(0, boyut - int(m.group(2)))
+        son = min(son, boyut - 1)
+        if bas > son:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{boyut}"})
+        kod = 206
+
+    def oku():
+        with open(yol, "rb") as f:
+            f.seek(bas)
+            kalan = son - bas + 1
+            while kalan > 0:
+                parca = f.read(min(1 << 16, kalan))
+                if not parca:
+                    break
+                kalan -= len(parca)
+                yield parca
+    basliklar = {"Accept-Ranges": "bytes", "Content-Length": str(son - bas + 1),
+                 "Content-Disposition": f"inline; filename*=UTF-8''{quote(os.path.basename(yol))}"}
+    if kod == 206:
+        basliklar["Content-Range"] = f"bytes {bas}-{son}/{boyut}"
+    return StreamingResponse(oku(), status_code=kod, media_type="audio/mp4", headers=basliklar)
+
+
+@app.get("/api/jobs/{job_id}/dinle-parcalar")
+def dinle_parcalar(job_id: int):
+    j = db.get(job_id)
+    return {"parca": len(_m4b_dosyalari(j)) if j else 0}
 
 
 @app.get("/api/services")

@@ -272,6 +272,16 @@ $("#metinBtn").onclick = async () => {
 const arapHarfli = s => /[\u0600-\u06FF]/.test(s || "");
 const sureYaz = sn => { const sa = Math.floor(sn / 3600), dk = Math.round((sn % 3600) / 60); return sa ? `${sa} sa ${dk} dk` : `${Math.max(1, dk)} dk`; };
 let isler = {};   // Stüdyo işleri (seslendirme durumu), id -> iş
+function sesCalar(id) {   // M4B'yi tarayıcıda çalar (büyük kitapta birden çok parça)
+  const kutu = E("div", { class: "ses" });
+  api(`/api/jobs/${id}/dinle-parcalar`).then(v => {
+    if (!v.parca) { kutu.append(E("p", { class: "meta" }, "Ses dosyası henüz yok.")); return; }
+    for (let i = 0; i < v.parca; i++)
+      kutu.append(E("div", {}, v.parca > 1 ? E("p", { class: "meta" }, `Kısım ${i + 1}`) : null,
+        E("audio", { controls: "", preload: "metadata", src: `/api/jobs/${id}/dinle?part=${i}`, style: "width:100%" })));
+  }).catch(() => kutu.append(E("p", { class: "meta" }, "Ses bilgisi alınamadı.")));
+  return kutu;
+}
 function sesYazisi(j) {
   if (!j) return null;
   if (j.status === "error") return "Seslendirme hatası: " + (j.error || "");
@@ -363,7 +373,7 @@ async function ayrinti(kid, li) {
       E("p", { class: "meta" }, "Kitap kendiliğinden seslendirilir; okuma ekranında düzeltme yapınca yalnız değişen bölümün sesi ve bütün biçimler yenilenir (son düzeltmeden 2 dakika sonra)."),
       d.durum.studyo_uyari ? E("p", { class: "uyari" }, d.durum.studyo_uyari) : null, durum,
       ad ? E("p", { class: "meta" }, `Çıktılar: /media/ZimaOS-HD/dedplay → EPUB, PDF, DOCX, TXT, HTML (Türkçe, Osmanlıca, Türkçe-Osmanlıca), MP3, M4B · dosya adı: "${ad}"`) : null,
-      j && j.ok_state === "bitti" ? E("audio", { controls: "", preload: "none", src: `/api/jobs/${j.id}/audio`, style: "width:100%" }) : null));
+      j && j.ok_state === "bitti" ? sesCalar(j.id) : null));
   }
   if (d.fihrist?.length) {
     const ol = E("ol");

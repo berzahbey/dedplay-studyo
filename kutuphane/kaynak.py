@@ -352,7 +352,8 @@ def pdf_sayfalari(yol, ilerleme=None):
             rows = _katman_satirlari(page)
         except Exception:
             rows = []
-        if sum(_harf(r["text"]) for r in rows) < 40 or (_ocr_motoru() == "surya" and _katman_kotu(rows)):
+        if (sum(_harf(r["text"]) for r in rows) < 40 or _katman_cop(rows)
+                or (_ocr_motoru() == "surya" and _katman_kotu(rows))):
             ocr.append(i)  # metin katmanı yok ya da kötü (eski OCR): sayfa yeniden okunur
         else:
             sayfalar[i] = (rows, page.rect.width, page.rect.height, False)
@@ -410,7 +411,8 @@ def ocr_gerekir(yol):
                 rows = _katman_satirlari(page)
             except Exception:
                 rows = []
-            if sum(_harf(r["text"]) for r in rows) < 40 or (_ocr_motoru() == "surya" and _katman_kotu(rows)):
+            if (sum(_harf(r["text"]) for r in rows) < 40 or _katman_cop(rows)
+                    or (_ocr_motoru() == "surya" and _katman_kotu(rows))):
                 ocr.append(i)
             else:
                 katman += [r["text"] for r in rows]
@@ -429,6 +431,14 @@ def ocr_gerekir(yol):
 def _ocr_motoru():
     """OCR_MOTORU: "surya" (varsayılan; Türkçe ve Arapçayı aynı satırda okur) ya da "tesseract"."""
     return os.environ.get("OCR_MOTORU", "surya").strip().lower()
+
+
+def _katman_cop(rows):
+    """0.5.22: Sayfanın metin katmanı harf değil sembol mü (Unicode tablosu olmayan yazı tipi: '!"#$%&'(#)*&('): boşluksuz
+    karakterlerin yarısından azı harf (en az 100 karakter). Böyle sayfa tek başına yeniden okunur; bütün kitabın katmanını
+    bozuk saydırmaz (Kudsi Hadisler: 48 sayfadan biri)."""
+    t = "".join("".join(r["text"].split()) for r in rows)
+    return len(t) >= 100 and sum(1 for c in t if c.isalpha()) < 0.5 * len(t)
 
 
 def _katman_kotu(rows):
@@ -1089,6 +1099,38 @@ def _sayfa_no_ve_kenar(rows, h):
     return no or tahmin, kalan  # 0.5.15: kesin numara satırı öncelikli
 
 
+_CUMLE_SONU = re.compile(r"""[.!?…"”’'»):;]\s*$""")
+
+
+def _bolum_acilislari(sayfa_satirlari, tekrar, anahtar):
+    """0.5.22: Sayfa başında tekrar eden ama üst bilgi olmayan satırlar: her bölümün yeni sayfada başladığı kitapta bölüm
+    başlığı ("1. KUDSİ HADİS", "2. KUDSİ HADİS"…) ve açılış cümlesi ("Yüce Allah (c.c) şöyle buyurmaktadır:"). Ayırt edici:
+    üst bilgi devam sayfalarında da durur (önceki sayfa çoğu zaman cümle ortasında biter); bölüm açılışı ise yalnız önceki
+    sayfanın metni bittiğinde gelir. Önceki sayfanın son gövde satırı (küçük puntolu dipnot hariç) en az %90 cümle sonuyla
+    bitiyorsa (en az 5 kez) satır korunur."""
+    def son_govde(rows):
+        if not rows:
+            return None
+        boy = sorted(r.get("h", 0) for r in rows)[len(rows) // 2]
+        for r in reversed(rows):
+            if r.get("h", 0) >= 0.9 * boy and anahtar(r["text"]) not in tekrar:
+                return r["text"]
+        return None
+    say, bitti = collections.Counter(), collections.Counter()
+    for j in range(1, len(sayfa_satirlari)):
+        for r in sayfa_satirlari[j][:2]:
+            k = anahtar(r["text"])
+            if k not in tekrar:
+                continue
+            son = son_govde(sayfa_satirlari[j - 1])
+            if son is None:
+                continue
+            say[k] += 1
+            if _CUMLE_SONU.search(son):
+                bitti[k] += 1
+    return {k for k, c in say.items() if c >= 5 and bitti[k] >= 0.9 * c}
+
+
 def _tekrar_edenleri_at(sayfa_satirlari):
     """Sayfaların ilk/son satırlarında tekrar eden üst/alt bilgiler (kitap adı, bölüm adı)."""
     anahtar = lambda t: re.sub(r"[\d\W]+", " ", t).strip().lower()
@@ -1099,6 +1141,7 @@ def _tekrar_edenleri_at(sayfa_satirlari):
                 sayac[anahtar(r["text"])] += 1
     esik = max(3, int(len(sayfa_satirlari) * 0.3))
     tekrar = {k for k, c in sayac.items() if c >= esik and k}
+    tekrar -= _bolum_acilislari(sayfa_satirlari, tekrar, anahtar)
     out = []
     for rows in sayfa_satirlari:
         ilk_son = {id(r) for r in rows[:2] + rows[-2:]}

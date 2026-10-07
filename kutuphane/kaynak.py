@@ -19,6 +19,7 @@ import unicodedata
 from concurrent.futures import ProcessPoolExecutor
 
 from . import kitap as K
+from . import rapor as R  # 0.5.23: kitap raporu (yalnız kayıt)
 from . import zeyrek_onarim  # noqa: F401  zeyrek'in kök kümesini bozan hatası (DZ'den önce yüklenmeli)
 
 try:  # Stüdyo'nun kodu (imajda /app/app)
@@ -1145,7 +1146,11 @@ def _tekrar_edenleri_at(sayfa_satirlari):
     out = []
     for rows in sayfa_satirlari:
         ilk_son = {id(r) for r in rows[:2] + rows[-2:]}
-        out.append([r for r in rows if not (id(r) in ilk_son and anahtar(r["text"]) in tekrar)])
+        kalan = [r for r in rows if not (id(r) in ilk_son and anahtar(r["text"]) in tekrar)]
+        for r in rows:
+            if id(r) in ilk_son and anahtar(r["text"]) in tekrar:
+                R.silindi("üst/alt bilgi satırı", r["text"])
+        out.append(kalan)
     return out
 
 
@@ -2000,6 +2005,10 @@ def pdf_oku(yol, ilerleme=None):
     toc_sayfalari = _icindekiler_devami(yol, sayfalar, satirlar, toc_sayfalari, bilgi.get("kaynak_sayfa"))
     if toc_sayfalari:  # içindekiler sayfalarının arasına/devamına düşen numaralı satır sayfaları da
         kalan = [i for i in kalan if i not in toc_sayfalari]
+    for i in sorted(set(range(n)) - set(kalan)):
+        ilk = " / ".join(r["text"] for r in satirlar[i][:3])
+        if ilk.strip():
+            R.silindi("içindekiler sayfası" if i in (toc_sayfalari or []) else "atılan ön/son sayfa", f"PDF s.{i + 1}: {ilk}")
     satirlar_k = _tekrar_edenleri_at([satirlar[i] for i in kalan])
     govde_k, govde_o = _govde_boyu(satirlar_k, False), _govde_boyu(satirlar_k, True)
     govde = govde_k or govde_o or 11
@@ -2788,13 +2797,14 @@ def _konusma_cizgileri(metinler):
     return [_KONUSMA_KISA.sub(r"\1—", t) for t in metinler]
 
 
-def _duzelt(metinler, onar=None):
+def _duzelt(metinler, onar=None, yer="metin"):
     """Stüdyo düzeltmeleri (sayfa atıfları KORUNUR: kitabın basılı sayfa numaraları EPUB'da var).
     onar: hangi kelime onarımları yapılsın (PDF'te hepsi; metin kaynağında onarim_gereksinimi'ne göre)."""
     onar = onar or TUM_ONARIMLAR
     basliklar = DZ.satir_ici_ust_bilgileri_bul([SAYFA_ISARET.sub(" ", t) for t in metinler])
     out = []
     for p in metinler:
+        p0 = p
         p = DZ.satir_ici_ust_bilgileri_sil(p, basliklar)
         p = DZ.cop_isaretleri_sil(p)
         if onar["tire"]:
@@ -2810,6 +2820,7 @@ def _duzelt(metinler, onar=None):
             p = _harf_kaybi_onar(p)  # 0.5.18
         p = re.sub(r"[ \t]{2,}", " ", p).replace(" ,", ",").replace(" .", ".").strip()
         p = re.sub(r"^(\d{1,3}[.)])(?=[^\s\d.)\ue002])", r"\1 ", p)
+        R.fark(p0, p, yer)
         out.append(p)
     return out
 
@@ -2913,6 +2924,7 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
             yeni = []
             for o in ogeler:
                 m = forma.sub("", o["metin"])
+                R.fark(o["metin"], m, "forma işareti")
                 if m != o["metin"]:
                     o = dict(o, metin=m, tur=o["tur"] if SAYFA_ISARET.sub("", m).strip() else "p")
                 yeni.append(o)
@@ -2925,7 +2937,7 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
             if m != ogeler[i]["metin"]:
                 ogeler[i] = dict(ogeler[i], metin=m)
     duz = _duzelt([o["metin"] for o in ogeler], onar)
-    notlar = dict(zip(notlar, _duzelt(list(notlar.values()), onar))) if notlar else {}
+    notlar = dict(zip(notlar, _duzelt(list(notlar.values()), onar, "dipnot"))) if notlar else {}
     kit = K.yeni(kunye)
     tasinan = []  # atılan paragraftaki sayfa işaretleri sonrakine geçer
     for o, metin in zip(ogeler, duz):
@@ -2933,6 +2945,7 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
         yazi = K.NOT_ISARETI.sub("", temiz).strip()
         if o["tur"] == "p" and not o.get("koru") and not K.NOT_ISARETI.search(temiz) and (not yazi or (DZ.cop_paragraf_mi(yazi) and not _AR.search(yazi))):
             tasinan += [e for e, _ in sayfalar]
+            R.silindi("çöp paragraf", yazi or temiz)
             continue
         sayfa = [{"no": e, "konum": {"tr": 0}} for e in tasinan] + [{"no": e, "konum": {"tr": k}} for e, k in sayfalar]
         tasinan = []
@@ -2940,6 +2953,7 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
             temiz2 = temiz if (o.get("fihrist") and not o.get("onar")) or not onar["harf"] \
                 else turkce_onar(_buyuk_baslik_onar(temiz))  # kitabın kendi fihristindeki / temiz kaynaktaki yazı zaten doğru
             if len(temiz2) == len(temiz):  # uzunluk aynı kalır (harf değişimi): sayfa konumları geçerli
+                R.fark(temiz, temiz2, "başlık")
                 temiz = temiz2
             K.blok_ekle(kit, "baslik", {"tr": temiz}, seviye=o.get("seviye", 1), sayfalar=sayfa)
         else:
@@ -2948,6 +2962,9 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     for b in kit["bloklar"]:
         kullanilan |= set(K.NOT_ISARETI.findall(b["metin"]["tr"]))
     kit["dipnotlar"] = {g: {"metin": {"tr": t}} for g, t in notlar.items() if g in kullanilan}
+    for g, t in notlar.items():
+        if g not in kullanilan:
+            R.silindi("bağlanamayan dipnot", t)
     # aynı etiketin tekrarı (ör. boş sayfa) ve sıra bozukluğu: ilk görüleni tut
     gorulen = set()
     for b in kit["bloklar"]:
@@ -3187,6 +3204,7 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
     okuyucu = {".pdf": pdf_oku, ".epub": epub_oku, ".docx": docx_oku, ".txt": txt_oku}.get(uzanti)
     if not okuyucu:
         raise ValueError("Desteklenmeyen dosya türü: " + uzanti)
+    R.basla()
     ogeler, notlar, bilgi = okuyucu(yol, ilerleme)
     if ilerleme:
         ilerleme("Metin düzeltiliyor")
@@ -3213,6 +3231,7 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
         kit["kunye"]["kapak"] = os.path.basename(kapak_yolu + uz)
     if not any(b["tur"] == "p" for b in kit["bloklar"]):
         raise ValueError("Dosyadan metin çıkarılamadı (boş ya da okunamayan dosya)")
+    R.bitir(kit, bilgi, uzanti)
     return kit
 
 

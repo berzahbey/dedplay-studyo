@@ -189,6 +189,11 @@ def _dosya_ekle(kid, yol):
     if not os.path.exists(yol):
         raise FileNotFoundError("Kaynak dosya bulunamadı: " + yol)
     kit = kaynak.cevir(yol, lambda m: durum_asama(kid, m), {"yol": yol}, kapak_yolu=os.path.join(klasor(kid), "kapak"))
+    try:  # 0.5.23: kitap raporu (rapor.json, rapor.txt); hata kitabı durdurmaz
+        from . import rapor
+        rapor.kaydet(klasor(kid), rapor.al())
+    except Exception:
+        pass
     eski = kitap_yolu(kid)
     if os.path.exists(eski):  # yeniden işleme: önceki hâl yedeklenir, Türkçe künye düzeltmeleri korunur
         onceki = K.yukle(eski)

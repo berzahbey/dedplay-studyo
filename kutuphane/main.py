@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.22"
+SURUM = "0.5.23"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -192,6 +192,21 @@ def osmanlicayi_yenile(kid: str):
 
 
 # ---------------- Kitaplar ----------------
+@app.get("/api/rapor")
+def toplu_rapor(uzun: int = 0):
+    """0.5.23: bütün kitapların raporlarının özeti (düz metin; tarayıcıda açılıp kaydedilebilir)."""
+    from . import rapor
+    return Response(rapor.toplu(kisa=not uzun), media_type="text/plain; charset=utf-8")
+
+
+@app.get("/api/kitaplar/{kid}/rapor")
+def kitap_raporu(kid: str):
+    yol = os.path.join(depo.klasor(kid), "rapor.txt")
+    if not os.path.exists(yol):
+        raise HTTPException(404, "Bu kitabın raporu yok (0.5.23'ten önce işlenmiş; yeniden yüklenince oluşur)")
+    return Response(open(yol, encoding="utf-8").read(), media_type="text/plain; charset=utf-8")
+
+
 @app.get("/api/kitaplar")
 def kitaplar():
     return depo.liste()

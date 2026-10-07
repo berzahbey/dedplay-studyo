@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.19"
+SURUM = "0.5.21"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -272,6 +272,13 @@ def kitap_sil(kid: str):
     d = depo.durum_oku(kid) if depo.KIMLIK.match(kid) else None
     if not d:
         raise HTTPException(404, "Böyle bir kitap yok")
+    is_no = (d.get("studyo") or {}).get("is")
+    if is_no:  # 0.5.21: kitabın Stüdyo işi (seslendirme sırası) de silinir; dedplay klasöründeki çıktılar kalır
+        try:
+            from app.main import delete_job
+            delete_job(int(is_no))
+        except Exception as e:
+            print(f"Stüdyo işi {is_no} silinemedi: {type(e).__name__}: {e}", flush=True)
     # 0.5.19: sırada bekleyen kitap hemen silinir; işi çalışan kitabın işi durdurulup kitap ardından silinir
     return {"ok": True, "durum": depo.sil_iste(kid)}
 

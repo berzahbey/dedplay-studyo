@@ -3,6 +3,10 @@ forma işareti, Yunan harfi, konuşma çizgisi. Örnekler kitabın kendi satırl
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# kelime listesi depoda yok, imajda (/app/app/data): test kod klasöründen çalışınca oradan okunur
+_liste = os.path.join(os.path.dirname(__file__), "..", "app", "data", "tr_kelime.txt")
+if not os.path.isfile(_liste) and os.path.isfile("/app/app/data/tr_kelime.txt"):
+    os.environ.setdefault("TR_KELIME", "/app/app/data/tr_kelime.txt")
 import logging
 logging.disable(logging.CRITICAL)
 from kutuphane import kaynak as S

@@ -195,6 +195,9 @@ def kutuphane_isi(baslik, osm_baslik, parcalar):
               osm_state="bitti" if hazir_osm else "calisiyor", osm_done=n if hazir_osm else 0, osm_total=n,
               osm_title=(k.osm_title or "").strip() or None,
               note="Dedplay Kütüphane'den geldi", status="active")
+    if hazir_osm:  # 0.5.21: biçimler sesi beklemez
+        from .worker import bicimleri_simdi_yaz
+        bicimleri_simdi_yaz(jid)
     return jid
 
 
@@ -223,6 +226,9 @@ def kutuphane_guncelle(jid, osm_baslik, parcalar):
                 save_outputs(jid)
             except Exception as e:
                 db.update(jid, note=f"Biçimler yenilenemedi: {str(e)[:200]}")
+        else:  # 0.5.21: seslendirme sürüyorsa da biçimler hemen yenilenir
+            from .worker import bicimleri_simdi_yaz
+            bicimleri_simdi_yaz(jid)
         return True
     name = j["book_name"] or j["title"]
     parts_to_epub([{"tr": p.tr} for p in ana], name, db.source_path(jid, name + ".epub"))
@@ -235,6 +241,8 @@ def kutuphane_guncelle(jid, osm_baslik, parcalar):
         upd["ok_state"] = "bekliyor"
     upd["degisti"] = time.time()   # art arda düzeltmelerde seslendirme ancak 2 dakika sessizlikten sonra başlar
     db.update(jid, **upd)
+    from .worker import bicimleri_simdi_yaz
+    bicimleri_simdi_yaz(jid)        # 0.5.21: düzeltilmiş metnin biçimleri sesi beklemez
     return True
 
 

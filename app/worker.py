@@ -21,7 +21,9 @@ from . import clients, db, textsrc, duzelt
 from .detect import detect_lang, sample_text
 
 TEXT_DIR = os.environ.get("OKUMA_TEXT_DIR", "/okuma-text")
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/cikti")
+# Kitap Okuma'nın çalışma klasörü dedplay/.seslendirme: Stüdyo onu /dedplay bağlantısının içinden görür, böylece
+# MP3/M4B sabit bağlantıyla verilebilir (iki ayrı Docker bağlantısı arasında sabit bağlantı kurulamaz)
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR") or ("/dedplay/.seslendirme" if os.path.isdir("/dedplay/.seslendirme") else "/cikti")
 TICK = 4
 OSM_BUDGET = 20  # saniye: her turda Osmanlıcaya ayrılan en fazla süre
 
@@ -319,21 +321,59 @@ DIL_KLASORU = {"tr": "Türkçe", "osm": "Osmanlıca", "iki": "Türkçe-Osmanlıc
 BICIM_KLASORU = {"pdf": "PDF", "docx": "DOCX", "txt": "TXT", "html": "HTML"}   # EPUB'ları Kütüphane yazar
 
 
+def _bagla(src, dst):
+    """Aynı diskteyse sabit bağlantı (aynı dosyaya ikinci ad, ek yer kaplamaz), değilse kopya."""
+    if os.path.lexists(dst):
+        os.remove(dst)
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+_bicim_kilidi = threading.Lock()
+
+
+def bicimleri_yaz(j, parts, name):
+    """PDF/DOCX/TXT/HTML -> /dedplay/<Biçim>/<Dil>/<Ad>.<uzantı> (birer birer; yarım dosya görünmesin diye geçici adla)."""
+    from .export import build
+    with _bicim_kilidi:
+        for fmt, bk in BICIM_KLASORU.items():
+            for variant, dk in DIL_KLASORU.items():
+                data, _, _ = build(j, parts, fmt, variant)
+                d = os.path.join(DEDPLAY_DIR, bk, dk)
+                os.makedirs(d, exist_ok=True)
+                hedef = os.path.join(d, f"{name}.{fmt}")
+                gecici = f"{hedef}.{threading.get_ident()}.tmp"
+                with open(gecici, "wb") as f:
+                    f.write(data)
+                os.replace(gecici, hedef)
+
+
+def bicimleri_simdi_yaz(jid):
+    """0.5.21: biçimler sesi beklemez. Stüdyo işi açılınca ve kitap düzeltilince arka planda hemen yazılır; MP3/M4B
+    seslendirme bitince eklenir (save_outputs)."""
+    def calis():
+        try:
+            j = db.get(jid)
+            if not j or j["osm_state"] != "bitti" or not os.path.isdir(DEDPLAY_DIR):
+                return
+            parts = db.all_parts(jid)
+            if parts:
+                bicimleri_yaz(j, parts, (j["book_name"] or j["title"]).replace("/", "-"))
+                print(f"[bicim] iş {jid}: PDF/DOCX/TXT/HTML yazıldı", flush=True)
+        except Exception as e:
+            traceback.print_exc()
+            db.update(jid, note=f"Biçimler yazılamadı: {str(e)[:200]}")
+    threading.Thread(target=calis, daemon=True, name=f"bicim-{jid}").start()
+
+
 def save_outputs_yeni(j, parts, name):
     """Tur 3: /dedplay altında biçim/dil/kitap adı düzeni:
     PDF/Türkçe/Kitap.pdf, PDF/Osmanlıca/…, PDF/Türkçe-Osmanlıca/… (DOCX, TXT, HTML aynı); MP3/Kitap/Kitap - 001.mp3;
     M4B/Kitap.m4b (büyük kitapta Kitap - 1.m4b, - 2…). Kitap Okuma'nın kendi dosyaları yerinde kalır (düzeltmede yalnız
     değişen bölüm yeniden okunsun diye)."""
-    from .export import build
-    for fmt, bk in BICIM_KLASORU.items():
-        for variant, dk in DIL_KLASORU.items():
-            data, _, _ = build(j, parts, fmt, variant)
-            d = os.path.join(DEDPLAY_DIR, bk, dk)
-            os.makedirs(d, exist_ok=True)
-            hedef = os.path.join(d, f"{name}.{fmt}")
-            with open(hedef + ".tmp", "wb") as f:
-                f.write(data)
-            os.replace(hedef + ".tmp", hedef)
+    bicimleri_yaz(j, parts, name)
     kaynak = os.path.join(OUTPUT_DIR, j["book_name"] or name)
     mp3s = sorted(glob.glob(os.path.join(glob.escape(kaynak), "Parca_*.mp3")) +
                   glob.glob(os.path.join(glob.escape(kaynak), "Bolum_*.mp3")), key=_natural)
@@ -344,7 +384,7 @@ def save_outputs_yeni(j, parts, name):
         width = max(3, len(str(len(mp3s))))
         for n, src in enumerate(mp3s, 1):
             dst = os.path.join(mdir, f"{name} - {n:0{width}d}.mp3")
-            shutil.copy2(src, dst)
+            _bagla(src, dst)
             _tag_mp3(dst, name, n, len(mp3s), width)
     m4bs = sorted(glob.glob(os.path.join(glob.escape(kaynak), "*.m4b")), key=_natural)
     if m4bs:
@@ -355,7 +395,7 @@ def save_outputs_yeni(j, parts, name):
                 os.remove(eski)
         for i, src in enumerate(m4bs, 1):
             hedef = os.path.join(md, f"{name}.m4b" if len(m4bs) == 1 else f"{name} - {i}.m4b")
-            shutil.copy2(src, hedef + ".tmp")
+            _bagla(src, hedef + ".tmp")
             os.replace(hedef + ".tmp", hedef)
 
 

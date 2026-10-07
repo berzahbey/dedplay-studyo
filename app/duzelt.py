@@ -274,6 +274,8 @@ def cop_paragraf_mi(p):
 
 
 _OZEL_BAS = "ıİğĞşŞçÇöÖüÜ"
+# 0.5.18: tek başına kelime olan kısa sağ parçalar ek sayılmaz ("bir çok" -> "birçok" yapılmaz)
+_AYRI_KELIMELER = {"çok", "şey", "şu", "üç", "öz", "ön", "iş"}
 
 
 def _gecerli_kelime(w):
@@ -307,6 +309,9 @@ def bolunmus_kelimeleri_birlestir(p):
                 break
             birlesik = sol_h + sag_kelime.group(0)
             ek_gibi = len(sag_kelime.group(0)) <= 3 or sag[0] in "ığ"
+            # 0.5.18: "bir çok", "bir şey", "pek çok" iki ayrı kelimedir (kitabın yazımı korunur)
+            if _kucuk(sag_kelime.group(0)) in _AYRI_KELIMELER and _gecerli_kelime(sol_h):
+                break
             if not _gecerli_kelime(birlesik):
                 break
             if not ek_gibi and _gecerli_kelime(sol_h) and _gecerli_kelime(sag_kelime.group(0)):

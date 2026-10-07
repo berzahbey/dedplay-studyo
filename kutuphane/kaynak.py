@@ -529,10 +529,24 @@ _KIRIL_LATIN = str.maketrans({"А": "A", "В": "B", "Е": "E", "К": "K", "М": 
 _CJK = re.compile(r"[\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]")
 
 
+# 0.5.18: silik baskıda "ey" -> "εy" (Yunan epsilon): yalnız Latin harfli kelimenin içindeki Yunan harfi çevrilir
+_YUNAN = re.compile(r"[\u0370-\u03FF]")
+_YUNAN_LATIN = str.maketrans({"α": "a", "ε": "e", "ο": "o", "ι": "ı", "κ": "k", "ν": "v", "τ": "t", "ρ": "p",
+                              "Α": "A", "Β": "B", "Ε": "E", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N",
+                              "Ο": "O", "Ρ": "P", "Τ": "T", "Χ": "X", "Υ": "Y", "Ζ": "Z"})
+
+
+def _yunan_harfleri(t):
+    return re.sub(r"\S+", lambda m: m.group().translate(_YUNAN_LATIN)
+                  if _YUNAN.search(m.group()) and _LATIN.search(m.group()) else m.group(), t)
+
+
 def _surya_harfleri(t):
     """Surya'nın Türkçe metinde yaptığı harf karışıklıkları. Kiril harfi yalnız Latin ağırlıklı (ya da tek harflik)
     parçada Latin eşine çevrilir."""
     t = t.translate(_SURYA_HARF)
+    if _YUNAN.search(t):
+        t = _yunan_harfleri(t)
     if _KIRIL.search(t):
         if len(_LATIN.findall(t)) >= len(_KIRIL.findall(t)) or len(t.strip()) <= 2:
             t = t.translate(_KIRIL_LATIN)
@@ -2653,6 +2667,84 @@ def onarim_gereksinimi(metinler):
     return {"tire": tire >= 50, "bolunmus": bolunmus >= 3, "harf": gecersiz > 0.30}
 
 
+# 0.5.18 ("Âlemlerin Sırrı"): OCR silik/italik baskıda Türkçe harfin noktasını ve çengelini düşürür: "Isa", "Allahin",
+# "sey", "Nasil", "AHIRET". Yalnız OCR'ın hata yaptığı yönde (i->ı, s->ş, c->ç, g->ğ, o->ö, u->ü; kelime başında I->İ)
+# ve yalnız geçersiz kelimede; şapka silinmez, eski imlâ (cevab, nakl, zikr) ve baskı hatası ("dıye") korunur.
+_KAYIP = {"i": "ı", "s": "ş", "c": "ç", "g": "ğ", "o": "ö", "u": "ü"}
+
+
+def _kayip_yonu(a, b):
+    return len(a) == len(b) and a != b and all(x == y or _KAYIP.get(x) == y for x, y in zip(a, b))
+
+
+def _harf_kaybi_kelime(w):
+    if len(w) < 2 or _AR.search(w):
+        return w
+    if w.isupper():
+        return _turkce_kelime_onar(w) if len(w) >= 3 else w
+    kk = DZ._kucuk(w)
+    kelimeler, iskelet = DZ._sozluk()
+
+    def gec(k):
+        return k in kelimeler or DZ.gecerli_mi(k)
+    if w[0] == "I" and w[1:].islower() and not gec(kk) and gec("i" + kk[1:]):  # Isa, Imam (Irak, Islandı kalır)
+        return "İ" + w[1:]
+    d = iskelet.get(kk.translate(DZ._TR_ISKELET))
+    if not d or not _kayip_yonu(kk, d):
+        return w
+    if gec(kk):
+        # kelime listesi altyazılardan derlenmiş, Türkçe harfsiz yazımlar da içinde ("sey", "icin", "nasil"): doğru
+        # yazım çok daha sıksa ve Zemberek harfsiz yazımı tanımıyorsa düzelt
+        if not (kk in kelimeler and d in kelimeler and kelimeler[d] * 5 < kelimeler[kk] and not DZ.gecerli_mi(kk)):
+            return w
+    if w[:1].isupper():
+        return {"i": "İ", "ı": "I"}.get(d[0], d[0].upper()) + d[1:]
+    return d
+
+
+def _izafet_1(p):
+    """OCR'ın 1 okuduğu izafet harfi: "Cenab-1 Hak" -> "Cenab-ı Hak", "Levh-1 Mahfuz" -> "Levh-i Mahfuz"."""
+    def f(m):
+        unlu = re.findall(r"[aıoueiöüâîû]", DZ._kucuk(m.group(1)))
+        return m.group(1) + "-" + ("ı" if (unlu[-1] if unlu else "a") in "aıouâû" else "i")
+    return re.sub(r"([^\W\d_]{2,})-1(?=[\s.,;:!?]|$)", f, p)
+
+
+def _harf_kaybi_onar(p):
+    return re.sub(r"[^\W\d_]+", lambda m: _harf_kaybi_kelime(m.group()), _izafet_1(p))
+
+
+_HARF_SINIFI = ["aâAÂ", "ıiIİîÎ", "sşSŞ", "cçCÇ", "gğGĞ", "oöOÖ", "uüûUÜÛ", "eE"]
+
+
+def _forma_deseni(baslik):
+    """Basılı kitabın forma işareti (16 sayfada bir, sayfa altında "Kitap Adı — 14"): kitap adı + çizgi + 1-2 basamak,
+    paragrafın sonunda ya da tek başına. Kitap adı en az iki kelime olmalı."""
+    kel = re.findall(r"[^\W\d_]+", baslik or "")
+    if len(kel) < 2:
+        return None
+    def sinif(c):
+        for s in _HARF_SINIFI:
+            if c in s:
+                return "[" + s + "]"
+        return re.escape(c)
+    ad = r"[\s'’-]+".join("".join(sinif(c) for c in k) for k in kel)
+    return re.compile(r"(?:(?<=\s)|^)" + ad + r"\s*[—–-]\s*\d{1,2}\s*(?=(?:\ue002[^\ue003]{1,20}\ue003\s*)*$)", re.I)
+
+
+_KONUSMA_KISA = re.compile(r"^((?:\ue002[^\ue003]{1,20}\ue003\s*)*«?\s*)-(?=\s)")
+_KONUSMA_UZUN = re.compile(r"^(?:\ue002[^\ue003]{1,20}\ue003\s*)*«?\s*—")
+
+
+def _konusma_cizgileri(metinler):
+    """Kitap konuşmalarda uzun çizgi (—) kullanıyorsa OCR'ın kısa okuduğu satır başı çizgisi (- ) uzun yapılır."""
+    uzun = sum(1 for t in metinler if _KONUSMA_UZUN.match(t))
+    kisa = sum(1 for t in metinler if _KONUSMA_KISA.match(t))
+    if uzun < 10 or uzun < kisa:
+        return metinler
+    return [_KONUSMA_KISA.sub(r"\1—", t) for t in metinler]
+
+
 def _duzelt(metinler, onar=None):
     """Stüdyo düzeltmeleri (sayfa atıfları KORUNUR: kitabın basılı sayfa numaraları EPUB'da var).
     onar: hangi kelime onarımları yapılsın (PDF'te hepsi; metin kaynağında onarim_gereksinimi'ne göre)."""
@@ -2672,6 +2764,7 @@ def _duzelt(metinler, onar=None):
         p = re.sub(r"\s*\(\s*\)", "", p)                                  # silinen numaradan kalan "()"
         if onar["harf"]:
             p = DZ.harfleri_onar(p)
+            p = _harf_kaybi_onar(p)  # 0.5.18
         p = re.sub(r"[ \t]{2,}", " ", p).replace(" ,", ",").replace(" .", ".").strip()
         p = re.sub(r"^(\d{1,3}[.)])(?=[^\s\d.)\ue002])", r"\1 ", p)
         out.append(p)
@@ -2771,6 +2864,23 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     if dil != "tr":   # Türkçe kelime onarımları (Zemberek) yabancı dilde metni bozar
         onar = {"tire": False, "bolunmus": False, "harf": False}
     kunye.setdefault("cikarma", {})["onarim"] = onar
+    if onar["harf"]:  # 0.5.18: forma işareti ve konuşma çizgisi (OCR'lı kitap)
+        forma = _forma_deseni((kunye.get("baslik") or {}).get("tr", ""))
+        if forma:
+            yeni = []
+            for o in ogeler:
+                m = forma.sub("", o["metin"])
+                if m != o["metin"]:
+                    o = dict(o, metin=m, tur=o["tur"] if SAYFA_ISARET.sub("", m).strip() else "p")
+                yeni.append(o)
+            ogeler = yeni
+            if notlar:
+                notlar = {g: forma.sub("", t).rstrip() for g, t in notlar.items()}
+        paragraflar = [i for i, o in enumerate(ogeler) if o["tur"] == "p"]
+        cizgili = _konusma_cizgileri([ogeler[i]["metin"] for i in paragraflar])
+        for i, m in zip(paragraflar, cizgili):
+            if m != ogeler[i]["metin"]:
+                ogeler[i] = dict(ogeler[i], metin=m)
     duz = _duzelt([o["metin"] for o in ogeler], onar)
     notlar = dict(zip(notlar, _duzelt(list(notlar.values()), onar))) if notlar else {}
     kit = K.yeni(kunye)

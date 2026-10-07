@@ -389,7 +389,9 @@ async function ayrinti(kid, li) {
   const sil = E("button", { class: "btn danger", type: "button" }, "Kitabı sil");
   sil.onclick = async () => {
     if (!confirm("Bu kitap, kitap.json dosyası ve bütün EPUB'larıyla birlikte silinecek. Emin misin?")) return;
-    try { await api("/api/kitaplar/" + encodeURIComponent(kid), { method: "DELETE" }); acik = null; kitaplar(); } catch (e) { alert(e.message); }
+    try { const r = await api("/api/kitaplar/" + encodeURIComponent(kid), { method: "DELETE" }); acik = null;
+          if (r && r.durum === "durduruluyor") alert("Kitabın işi şu an çalışıyor; iş durdurulup kitap birkaç dakika içinde silinecek.");
+          kitaplar(); } catch (e) { alert(e.message); }
   };
   const okuBag = d.kunye ? E("a", { class: "btn", href: "/oku/" + encodeURIComponent(kid) }, "Oku ve düzelt") : null;
   kutu.append(E("div", { class: "alt" }, okuBag, yeniden, osm, sil));

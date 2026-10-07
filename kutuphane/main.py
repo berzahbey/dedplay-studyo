@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.18"
+SURUM = "0.5.19"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -272,10 +272,8 @@ def kitap_sil(kid: str):
     d = depo.durum_oku(kid) if depo.KIMLIK.match(kid) else None
     if not d:
         raise HTTPException(404, "Böyle bir kitap yok")
-    if d.get("asama") not in ("hazır", "hata"):
-        raise HTTPException(409, "Kitap şu an işleniyor; bitince silebilirsiniz")
-    depo.sil(kid)
-    return {"ok": True}
+    # 0.5.19: sırada bekleyen kitap hemen silinir; işi çalışan kitabın işi durdurulup kitap ardından silinir
+    return {"ok": True, "durum": depo.sil_iste(kid)}
 
 
 @app.post("/api/kitaplar/{kid}/studyo")

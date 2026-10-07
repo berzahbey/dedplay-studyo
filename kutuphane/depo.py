@@ -31,6 +31,16 @@ _is_kilitleri = {}  # aynı kitabın iki işi aynı anda çalışmasın
 _kilit = threading.Lock()
 _kitap_kilitleri = {}
 _bekleyen_epub = set()  # kuyrukta bekleyen EPUB işleri: art arda düzeltmelerde tek iş
+# 0.5.19: kuyruktaki kitap silinebilir. Her kitabın bir "nesli" var; silinince artar ve kuyrukta kalan eski işleri
+# geçersiz olur (aynı kitap yeniden eklenirse yeni nesille çalışır). İşi çalışan kitap "silinecek" diye işaretlenir:
+# iş bir sonraki ilerleme bildiriminde durur, sonra kitap silinir.
+_nesil = {}
+_calisan = {}       # şerit adı -> kitap kimliği
+_silinecek = set()
+
+
+class IsIptal(Exception):
+    pass
 
 
 def kitap_kilidi(kid):
@@ -231,6 +241,8 @@ def _studyoya_zincirle(kid, guncelle=False, yalniz_var_olan=False):
 
 
 def durum_asama(kid, mesaj):
+    if kid in _silinecek:  # 0.5.19: kitap silinmek istendi: iş burada durur (OCR'da en geç 4 sayfada bir)
+        raise IsIptal("Kitap silinmek üzere: iş durduruldu")
     durum_yaz(kid, asama=mesaj)
 
 
@@ -243,20 +255,28 @@ def isci(agir=False):
     """0.5.17: iki şerit. Hafif şerit, OCR gerektiren dosya işini ağır şeride devreder. Aynı kitabın iki işi aynı anda
     çalışmaz: kitabın işi ağır şeritte sürerken gelen hafif iş ağır şeridin arkasına geçer."""
     kuyruk = _kuyruk_agir if agir else _kuyruk
+    serit = "agir" if agir else "hafif"
     while True:
-        tur, kid, arg = kuyruk.get()
+        tur, kid, arg, nesil = kuyruk.get()
+        with _kilit:  # 0.5.19: silinen kitabın kuyrukta kalan işi atlanır
+            gecerli = nesil == _nesil.get(kid, 0)
+            if gecerli:
+                _calisan[serit] = kid
+        if not gecerli:
+            kuyruk.task_done()
+            continue
         try:
             if not agir and tur == "dosya":
                 durum_asama(kid, "Dosya inceleniyor")
                 if kaynak.ocr_gerekir(arg):
                     durum_yaz(kid, asama="OCR sırasında")
-                    _kuyruk_agir.put((tur, kid, arg))
+                    _kuyruk_agir.put((tur, kid, arg, nesil))
                     continue
             kilit = _is_kilidi(kid)
             if not agir and not kilit.acquire(blocking=False):
                 # bu kitabın işi ağır şeritte sürüyor (hafif şerit tek iş parçacığı): iş ağır şeridin arkasına geçer,
                 # hafif şerit beklemez ve dönüp durmaz
-                _kuyruk_agir.put((tur, kid, arg))
+                _kuyruk_agir.put((tur, kid, arg, nesil))
                 continue
             if agir:
                 kilit.acquire()  # hafif şeritteki kısa iş bitene kadar bekler
@@ -264,7 +284,18 @@ def isci(agir=False):
                 _isle(tur, kid, arg)
             finally:
                 kilit.release()
+        except IsIptal:
+            pass
+        except Exception:
+            traceback.print_exc()
         finally:
+            with _kilit:
+                _calisan.pop(serit, None)
+                sonra_sil = kid in _silinecek and kid not in _calisan.values()
+                if sonra_sil:
+                    _silinecek.discard(kid)
+            if sonra_sil:
+                sil(kid)
             kuyruk.task_done()
 
 
@@ -288,6 +319,8 @@ def _isle(tur, kid, arg):
                             K.kaydet(kit, kitap_yolu(kid))
                         except Exception as e:
                             durum_yaz(kid, uyari=f"Künyenin Osmanlıcası çevrilemedi: {type(e).__name__}")
+            if kid in _silinecek:  # 0.5.19: kitap silinecek: EPUB, Stüdyo ve Osmanlıca zinciri yok
+                return
             epub_uret(kid)
             if tur == "osmanlica":  # tur 2/A: Osmanlıca ve EPUB'lar hazır -> kendiliğinden Stüdyo
                 _studyoya_zincirle(kid, guncelle=True)
@@ -298,7 +331,11 @@ def _isle(tur, kid, arg):
                 kit = K.yukle(kitap_yolu(kid))
                 if kit["kunye"].get("asil_dil") == "tr":
                     is_ekle("osmanlica", kid, tur="epub")
+        except IsIptal:
+            return
         except Exception as e:
+            if kid in _silinecek:
+                return
             traceback.print_exc()
             durum_yaz(kid, asama="hata", hata=f"{type(e).__name__}: {e}")
 
@@ -312,7 +349,7 @@ def is_ekle(is_turu, kid, arg=None, **durum):
     # 0.5.17: yazı işi söyler (Türkçe EPUB hazırken "sırada" yanıltıcıydı); işin türü yeniden başlatma için saklanır
     yazi = {"osmanlica": "Osmanlıca sırada", "epub": "EPUB sırada", "kunye": "EPUB sırada"}.get(is_turu, "sırada")
     durum_yaz(kid, asama=yazi, hata=None, is_turu=is_turu, is_arg=arg, **durum)
-    _kuyruk.put((is_turu, kid, arg))
+    _kuyruk.put((is_turu, kid, arg, _nesil.get(kid, 0)))
 
 
 def baslat():
@@ -321,6 +358,9 @@ def baslat():
     # 0.5.8: çeviri kaldırıldı; çeviri izleyicisi başlatılmaz
     # yeniden başlatmada yarım kalan işler kuyruğa geri alınır
     for k in liste():
+        if durum_oku(k["kimlik"]).get("silinecek"):  # 0.5.19: silinmek istenirken yeniden başlatıldı
+            sil(k["kimlik"])
+            continue
         if k.get("asama") not in (None, "hazır", "hata"):
             d = durum_oku(k["kimlik"])
             if d.get("is_turu"):  # 0.5.17: yarım kalan işin kendisi (Osmanlıca işi "epub" diye geri alınıyordu)
@@ -330,4 +370,20 @@ def baslat():
 
 
 def sil(kid):
-    shutil.rmtree(klasor(kid))
+    shutil.rmtree(klasor(kid), ignore_errors=True)
+
+
+def sil_iste(kid):
+    """0.5.19: kitabı sil. Sırada bekliyorsa (ya da hazır/hata) hemen silinir: kuyruktaki işleri atlanır.
+    İşi şu an çalışıyorsa iş durdurulur ve kitap ardından silinir. Dönen: \"silindi\" ya da \"durduruluyor\"."""
+    with _kilit:
+        _nesil[kid] = _nesil.get(kid, 0) + 1
+        _bekleyen_epub.discard(kid)
+        calisiyor = kid in _calisan.values()
+        if calisiyor:
+            _silinecek.add(kid)
+    if calisiyor:
+        durum_yaz(kid, silinecek=True)
+        return "durduruluyor"
+    sil(kid)
+    return "silindi"

@@ -389,6 +389,12 @@ async function ayrinti(kid, li) {
     kutu.append(E("details", { class: "fihrist" }, E("summary", {}, `Fihrist (${d.fihrist.length} başlık)`), ol));
   }
   const yeniden = E("button", { class: "btn ghost", type: "button" }, "EPUB'ları yeniden üret");
+  const kaynaktan = E("button", { class: "btn ghost", type: "button" }, "Kaynaktan yeniden işle");
+  kaynaktan.onclick = async () => {
+    if (!confirm("Kitap kaynak dosyasından baştan işlenecek (temizlik, Osmanlıca, EPUB'lar ve biçimler; seste yalnız değişen bölümler yenilenir). Okuma ekranında yaptığın metin düzeltmeleri bu sırada kaybolur (önceki hâli yedeklenir); elle düzelttiğin ad ve yazar korunur. Devam edilsin mi?")) return;
+    kaynaktan.disabled = true;
+    await api(`/api/kitaplar/${encodeURIComponent(kid)}/kaynaktan`, { method: "POST" }).catch(e => alert(e.message)); kitaplar();
+  };
   yeniden.onclick = async () => { yeniden.disabled = true; await api(`/api/kitaplar/${encodeURIComponent(kid)}/yeniden`, { method: "POST" }).catch(e => alert(e.message)); kitaplar(); };
   const osm = d.diller?.includes("tr") ? E("button", { class: "btn ghost", type: "button" }, "Osmanlıcayı yeniden çevir") : null;
   if (osm) osm.onclick = async () => { osm.disabled = true; await api(`/api/kitaplar/${encodeURIComponent(kid)}/osmanlica`, { method: "POST" }).catch(e => alert(e.message)); kitaplar(); };
@@ -400,7 +406,7 @@ async function ayrinti(kid, li) {
           kitaplar(); } catch (e) { alert(e.message); }
   };
   const okuBag = d.kunye ? E("a", { class: "btn", href: "/oku/" + encodeURIComponent(kid) }, "Oku ve düzelt") : null;
-  kutu.append(E("div", { class: "alt" }, okuBag, yeniden, osm, sil));
+  kutu.append(E("div", { class: "alt" }, okuBag, yeniden, kaynaktan, osm, sil));
 }
 // ---- toplu silme (Hepsini seç / Seçilenleri sil) ----
 const topluSecili = new Set();
@@ -415,7 +421,9 @@ function topluCubukKur(ul) {
   };
   const dugme = E("button", { class: "btn danger", type: "button", id: "topluSil" }, "Seçilenleri sil");
   dugme.onclick = topluSil;
-  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme);
+  const dugme2 = E("button", { class: "btn ghost", type: "button", id: "topluKaynaktan" }, "Seçilenleri kaynaktan yeniden işle");
+  dugme2.onclick = topluKaynaktan;
+  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme2, dugme);
   ul.parentNode.insertBefore(topluCubuk, ul);
 }
 function topluGuncelle(liste) {
@@ -429,7 +437,23 @@ function topluGuncelle(liste) {
   if (!topluCalisiyor) {
     d.disabled = !topluSecili.size;
     d.textContent = topluSecili.size ? `Seçilenleri sil (${topluSecili.size})` : "Seçilenleri sil";
+    const d2 = topluCubuk.querySelector("#topluKaynaktan"); if (d2) d2.disabled = !topluSecili.size;
   }
+}
+async function topluKaynaktan() {
+  const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));
+  if (!secilen.length || !confirm(`${secilen.length} kitap kaynak dosyasından baştan işlenecek. Okuma ekranında yapılan metin düzeltmeleri kaybolur (önceki hâli yedeklenir); elle düzeltilen ad ve yazar korunur. Devam edilsin mi?`)) return;
+  const d = topluCubuk.querySelector("#topluKaynaktan");
+  topluCalisiyor = true; d.disabled = true;
+  let hata = 0;
+  for (let i = 0; i < secilen.length; i++) {
+    d.textContent = `Sıraya alınıyor ${i + 1}/${secilen.length}…`;
+    try { await api(`/api/kitaplar/${encodeURIComponent(secilen[i].kimlik)}/kaynaktan`, { method: "POST" }); topluSecili.delete(secilen[i].kimlik); }
+    catch (e) { hata++; }
+  }
+  topluCalisiyor = false; d.textContent = "Seçilenleri kaynaktan yeniden işle";
+  if (hata) alert(`${hata} kitap sıraya alınamadı (kaynak dosyası bulunamamış olabilir).`);
+  kitaplar();
 }
 async function topluSil() {
   const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));

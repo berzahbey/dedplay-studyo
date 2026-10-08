@@ -2804,6 +2804,20 @@ def _parca_gecerli(k):
     return _parca_onbellek[k]
 
 
+def _kelimelere_ayir(blob):
+    """0.5.26: birleştirilmiş harf zincirini sözlüğe göre en az kelimeye ayırır ("ONÜÇÜNCÜCÜMLE" -> "ON ÜÇÜNCÜ CÜMLE")."""
+    n = len(blob)
+    en = [None] * (n + 1)
+    en[0] = []
+    for i in range(2, n + 1):
+        for j in range(max(0, i - 20), i - 1):
+            if en[j] is not None and _parca_gecerli(DZ._kucuk(blob[j:i])):
+                aday = en[j] + [blob[j:i]]
+                if en[i] is None or len(aday) < len(en[i]):
+                    en[i] = aday
+    return " ".join(en[n]) if en[n] else blob
+
+
 def _bolunmus_birlestir(p):
     """0.5.25: PDF metin katmanında boşlukla bölünmüş kelime: 'tartışıl ması' -> 'tartışılması', 'A n cak' -> 'Ancak'.
     Yalnız parçalardan biri tek başına geçersizse ve birleşik hali geçerli bir kelimeyse (iki ya da üç parça);
@@ -2813,6 +2827,17 @@ def _bolunmus_birlestir(p):
     tok = [(m.start(), m.end()) for m in _BOLUK_KELIME.finditer(p)]
     out, son, i = [], 0, 0
     while i < len(tok):
+        # 0.5.26: harfleri aralıklı yazılmış kelime ("D E L İ L"): üç ve daha çok tek harflik zincir
+        j = i
+        while (j + 1 < len(tok) and tok[j][1] - tok[j][0] == 1 and tok[j + 1][1] - tok[j + 1][0] == 1
+               and p[tok[j][1]:tok[j + 1][0]] == " "):
+            j += 1
+        if j - i >= 2:
+            out.append(p[son:tok[i][0]])
+            out.append(_kelimelere_ayir("".join(p[s:e] for s, e in tok[i:j + 1])))
+            son = tok[j][1]
+            i = j + 1
+            continue
         birles = None
         for n in (3, 2):
             if i + n > len(tok):
@@ -3000,7 +3025,7 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     kunye.setdefault("cikarma", {})["onarim"] = onar
     if not metin_kaynagi and dil == "tr":  # 0.5.25: PDF metin katmanında boşlukla bölünmüş kelimeler
         for o in ogeler:
-            if o["tur"] == "p":
+            if o["tur"] in ("p", "baslik"):  # 0.5.26: başlıklarda da (aralıklı harfli başlık)
                 yeni = _bolunmus_birlestir(o["metin"])
                 if yeni != o["metin"]:
                     try:

@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.25"
+SURUM = "0.5.26"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -267,6 +267,24 @@ def kunye_duzelt(kid: str, k: Kunye):
 def yeniden(kid: str):
     _kitap(kid)
     depo.is_ekle("epub", kid, tur="epub")
+    return {"ok": True}
+
+
+@app.post("/api/kitaplar/{kid}/kaynaktan")
+def kaynaktan_yeniden(kid: str):
+    """0.5.26: kitabı kaynağından baştan işler (temizlik, Osmanlıca, EPUB'lar; Stüdyo işi yenilenir).
+    Okuma ekranındaki metin düzeltmeleri korunmaz (önceki kitap.json yedeklenir); elle düzeltilen ad/yazar korunur."""
+    _kitap(kid)
+    d = depo.durum_oku(kid)
+    yol = d.get("kaynak_kimlik")
+    if not yol:
+        raise HTTPException(400, "Kitabın kaynağı kayıtlı değil")
+    if os.path.isabs(yol):
+        if not os.path.isfile(yol):
+            raise HTTPException(404, "Kaynak dosya bulunamadı: " + yol)
+        depo.is_ekle("dosya", kid, yol, tur="dosya")
+    else:  # OpenITI: indirilmiş metinden yeniden
+        depo.is_ekle("openiti", kid, yol, tur="openiti")
     return {"ok": True}
 
 

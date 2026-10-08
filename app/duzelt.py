@@ -66,11 +66,15 @@ _UST_BILGI = re.compile(rf"(?<![\w])(\d{{1,4}})\s+([{_BUYUK}][{_BUYUK}'’\- ]{{
 def satir_ici_ust_bilgileri_bul(paras):
     """Kitap boyunca farklı sayfa numaralarıyla tekrar eden büyük harfli ifadeler (sayfa üst bilgileri)."""
     sayac = collections.defaultdict(set)
-    for p in paras:
+    yerler = collections.defaultdict(set)  # 0.5.26: kaynakçadaki "IBLA 21" gibi tek paragraftaki tekrar üst bilgi değil
+    adet = collections.Counter()  # 0.5.26: gerçek üst bilgide her sayfa numarası bir kez geçer (kaynakçada "IBLA 21" beş kez)
+    for i, p in enumerate(paras):
         for m in _UST_BILGI.finditer(p):
             no, baslik = (m.group(1), m.group(2)) if m.group(1) else (m.group(4), m.group(3))
             sayac[baslik.strip()].add(no)
-    return {b for b, nolar in sayac.items() if len(nolar) >= 3}
+            yerler[baslik.strip()].add(i)
+            adet[(baslik.strip(), no)] += 1
+    return {b for b, nolar in sayac.items() if len(nolar) >= 3 and len(yerler[b]) >= 3 and max(adet[(b, n)] for n in nolar) <= 2}
 
 
 # 0.5.25: üst bilginin OCR'da tutmayan ilk kelimeleri ("HADİS RİVAYETLERİNİN") silinen yerin önünde kalmasın

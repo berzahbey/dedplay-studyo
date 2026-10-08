@@ -256,11 +256,16 @@ def _is_kilidi(kid):
         return _is_kilitleri.setdefault(kid, threading.Lock())
 
 
+_kuyruk_osm = type(_kuyruk)()  # 0.5.25: Osmanlıca ayrı şerit (inceleme sırasını beklemez)
+
+
 def isci(agir=False):
     """0.5.17: iki şerit. Hafif şerit, OCR gerektiren dosya işini ağır şeride devreder. Aynı kitabın iki işi aynı anda
     çalışmaz: kitabın işi ağır şeritte sürerken gelen hafif iş ağır şeridin arkasına geçer."""
-    kuyruk = _kuyruk_agir if agir else _kuyruk
-    serit = "agir" if agir else "hafif"
+    kuyruk = _kuyruk_osm if agir == "osm" else (_kuyruk_agir if agir else _kuyruk)
+    serit = "osm" if agir == "osm" else ("agir" if agir else "hafif")
+    if agir == "osm":
+        agir = False  # hafif şerit gibi: kitabın başka işi sürüyorsa ağır şeridin arkasına geçer
     while True:
         tur, kid, arg, nesil = kuyruk.get()
         with _kilit:  # 0.5.19: silinen kitabın kuyrukta kalan işi atlanır
@@ -354,12 +359,13 @@ def is_ekle(is_turu, kid, arg=None, **durum):
     # 0.5.17: yazı işi söyler (Türkçe EPUB hazırken "sırada" yanıltıcıydı); işin türü yeniden başlatma için saklanır
     yazi = {"osmanlica": "Osmanlıca sırada", "epub": "EPUB sırada", "kunye": "EPUB sırada"}.get(is_turu, "sırada")
     durum_yaz(kid, asama=yazi, hata=None, is_turu=is_turu, is_arg=arg, **durum)
-    _kuyruk.put((is_turu, kid, arg, _nesil.get(kid, 0)))
+    (_kuyruk_osm if is_turu == "osmanlica" else _kuyruk).put((is_turu, kid, arg, _nesil.get(kid, 0)))
 
 
 def baslat():
     threading.Thread(target=isci, daemon=True, name="kutuphane-hafif").start()
     threading.Thread(target=isci, args=(True,), daemon=True, name="kutuphane-agir").start()
+    threading.Thread(target=isci, args=("osm",), daemon=True, name="kutuphane-osmanlica").start()
     # 0.5.8: çeviri kaldırıldı; çeviri izleyicisi başlatılmaz
     # yeniden başlatmada yarım kalan işler kuyruğa geri alınır
     for k in liste():

@@ -2338,6 +2338,13 @@ def epub_oku(yol, ilerleme=None):
         # bazı EPUB'lar .html sayfalarının türünü yanlış işaretler: uzantıya da bakılır
         if item and (item.get_type() == ITEM_DOCUMENT or item.get_name().lower().endswith((".html", ".htm", ".xhtml"))):
             belgeler.append((os.path.basename(item.get_name()), BeautifulSoup(_word_temizle(item.get_content()), "html.parser")))
+    # 0.5.25: dipnottan metne geri dönüş bağlantısını ayırmak için her öğenin okuma sırasındaki yeri
+    _sira = {}
+    for _i, (_ad, _soup) in enumerate(belgeler):
+        for _k, _el in enumerate(_soup.find_all(True)):
+            _sira[id(_el)] = (_i, _k)
+            if _el.get("id"):
+                _sira.setdefault((_ad, _el["id"]), (_i, _k))
     # 1) dipnot hedefleri: kısa (rakam, [1], *) bağlantıların gösterdiği öğeler
     hedef = {}
     for ad, soup in belgeler:
@@ -2346,6 +2353,9 @@ def epub_oku(yol, ilerleme=None):
             tip = (a.get("epub:type") or "") + " " + (a.get("role") or "")
             if "#" in a["href"] and ("noteref" in tip or re.fullmatch(r"[\[\(]?\d{1,3}[\]\)]?|\*{1,3}|[¹²³⁴-⁹⁰]+", yazi)):
                 dosya, frag = a["href"].split("#", 1)
+                _hk = _sira.get((os.path.basename(dosya) or ad, frag))
+                if _hk is not None and _hk < _sira.get(id(a), (0, 0)):
+                    continue  # 0.5.25: geri dönüş bağlantısı (dipnottan metne): hedefi dipnot değil
                 hedef[(os.path.basename(dosya) or ad, frag)] = None
     notlar, not_elemanlari, gid_of = {}, set(), {}
     for ad, soup in belgeler:
@@ -2404,6 +2414,13 @@ def epub_oku(yol, ilerleme=None):
     son_seviye = 1  # fihristteki son başlığın seviyesi (fihristte olmayan gerçek başlık etiketi bunun altına)
     for sira, (ad, soup) in enumerate(belgeler):
         if sira < ilk_belge:
+            # 0.5.25: kapak sayfasındaki eserin kendi tanıtım paragrafı (uzun; künye, fihrist değil) metnin başına
+            for el in (soup.body or soup).find_all(_BLOK):
+                if el.find(_BLOK) or el.find("a", href=True) or any(id(q) in not_elemanlari for q in [el] + list(el.parents)):
+                    continue
+                t = metin_cikar(el, ad)
+                if len(t.split()) >= 15 and not TS.KUNYE.search(t) and not TS.ICINDEKILER.search(t):
+                    ogeler.append({"tur": "p", "metin": t, "boy": 0, "koru": True})
             continue  # fihristin gösterdiği ilk yerden önceki kapak, künye, içindekiler sayfası
         govde = soup.body or soup
         for el in govde.find_all(_BLOK):
@@ -2744,7 +2761,7 @@ def _kayip_yonu(a, b):
 
 
 def _harf_kaybi_kelime(w):
-    if len(w) < 2 or _AR.search(w):
+    if len(w) < 2 or _AR.search(w) or re.fullmatch(r"[IVXLCDM]+", w):  # 0.5.25: Roma rakamı (III, XXI)
         return w
     if w.isupper():
         return _turkce_kelime_onar(w) if len(w) >= 3 else w
@@ -2774,6 +2791,52 @@ def _izafet_1(p):
         unlu = re.findall(r"[aıoueiöüâîû]", DZ._kucuk(m.group(1)))
         return m.group(1) + "-" + ("ı" if (unlu[-1] if unlu else "a") in "aıouâû" else "i")
     return re.sub(r"([^\W\d_]{2,})-1(?=[\s.,;:!?]|$)", f, p)
+
+
+_BOLUK_KELIME = re.compile(r"[^\W\d_]+")
+_parca_onbellek = {}
+
+
+def _parca_gecerli(k):
+    if k not in _parca_onbellek:
+        kelimeler, _ = DZ._sozluk()
+        _parca_onbellek[k] = k in kelimeler or bool(DZ.gecerli_mi(k))
+    return _parca_onbellek[k]
+
+
+def _bolunmus_birlestir(p):
+    """0.5.25: PDF metin katmanında boşlukla bölünmüş kelime: 'tartışıl ması' -> 'tartışılması', 'A n cak' -> 'Ancak'.
+    Yalnız parçalardan biri tek başına geçersizse ve birleşik hali geçerli bir kelimeyse (iki ya da üç parça);
+    'bir şey' gibi iki geçerli kelime ayrı kalır."""
+    if not p:
+        return p
+    tok = [(m.start(), m.end()) for m in _BOLUK_KELIME.finditer(p)]
+    out, son, i = [], 0, 0
+    while i < len(tok):
+        birles = None
+        for n in (3, 2):
+            if i + n > len(tok):
+                continue
+            parca = tok[i:i + n]
+            if any(p[parca[j][1]:parca[j + 1][0]] != " " for j in range(n - 1)):
+                continue
+            kel = [p[s:e] for s, e in parca]
+            if any(_AR.search(k) for k in kel) or (kel[0].isupper() and len(kel[0]) > 1):
+                continue
+            if all(_parca_gecerli(DZ._kucuk(k)) for k in kel):
+                continue
+            if _parca_gecerli(DZ._kucuk("".join(kel))):
+                birles = (parca[0][0], parca[-1][1], "".join(kel), n)
+                break
+        if birles:
+            out.append(p[son:birles[0]])
+            out.append(birles[2])
+            son = birles[1]
+            i += birles[3]
+        else:
+            i += 1
+    out.append(p[son:])
+    return "".join(out)
 
 
 def _harf_kaybi_onar(p):
@@ -2928,10 +2991,23 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
         birlesik.append(o)
     ogeler = birlesik
     # metni zaten olan kaynakta (EPUB/DOCX/TXT) yalnız gereken onarım yapılır; hatasız kitap bozulmaz
-    onar = onarim_gereksinimi([o["metin"] for o in ogeler]) if metin_kaynagi else TUM_ONARIMLAR
+    # 0.5.25: PDF'in metin katmanı da yayıncının metnidir: kitabın çoğu taranmamışsa onarım ölçülerek açılır
+    cik = kunye.get("cikarma") or {}
+    tarama = cik.get("bozuk_katman") or (cik.get("ocr") or 0) >= 0.5 * max(1, cik.get("sayfa") or 1)
+    onar = onarim_gereksinimi([o["metin"] for o in ogeler]) if (metin_kaynagi or not tarama) else TUM_ONARIMLAR
     if dil != "tr":   # Türkçe kelime onarımları (Zemberek) yabancı dilde metni bozar
         onar = {"tire": False, "bolunmus": False, "harf": False}
     kunye.setdefault("cikarma", {})["onarim"] = onar
+    if not metin_kaynagi and dil == "tr":  # 0.5.25: PDF metin katmanında boşlukla bölünmüş kelimeler
+        for o in ogeler:
+            if o["tur"] == "p":
+                yeni = _bolunmus_birlestir(o["metin"])
+                if yeni != o["metin"]:
+                    try:
+                        R.fark(o["metin"], yeni, "birleştirme")
+                    except Exception:
+                        pass
+                    o["metin"] = yeni
     if onar["harf"]:  # 0.5.18: forma işareti ve konuşma çizgisi (OCR'lı kitap)
         forma = _forma_deseni((kunye.get("baslik") or {}).get("tr", ""))
         if forma:
@@ -3079,12 +3155,10 @@ def _sira_duzelt(bilgi, ad_baslik, ad_yazar):
     """Dosya adı 'Eser - Yazar' sırasıyla yazılmışsa (beklenen 'Yazar - Eser') iki taraf yer değiştirir."""
     if not ad_yazar:
         return ad_baslik, ad_yazar
-    my, mb = (bilgi.get("yazar") or "").strip(), (bilgi.get("baslik") or "").strip()
-    if my and _benzer(my, ad_baslik) and not _benzer(my, ad_yazar):
-        return ad_yazar, ad_baslik
-    if mb and _benzer(mb, ad_yazar) and not _benzer(mb, ad_baslik):
-        return ad_yazar, ad_baslik
+    # 0.5.25: künyeye bakılmaz (künyesi ters yazılmış EPUB var: Nuhun Gemisi); yalnız dosya adındaki açık işaret
     if "&" in ad_baslik and "&" not in ad_yazar:
+        return ad_yazar, ad_baslik
+    if re.search(r"[(:]", ad_yazar) and not re.search(r"[(:]", ad_baslik):
         return ad_yazar, ad_baslik
     return ad_baslik, ad_yazar
 

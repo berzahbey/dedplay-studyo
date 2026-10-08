@@ -40,7 +40,7 @@ def _kelime_mi(w):
     return w in k or w.translate(_SAPKA) in k
 
 
-def _birlesik(sol, sag):
+def _birlesik_sozluk(sol, sag):
     """Sayfa geçişinde bölünen kelime: sol+sağ gerçek bir kelimeyse (Türkçe harf farkları dahil) onu döndürür."""
     kelimeler, iskelet = _sozluk()
     aday = (sol + sag).lower()
@@ -73,6 +73,10 @@ def satir_ici_ust_bilgileri_bul(paras):
     return {b for b, nolar in sayac.items() if len(nolar) >= 3}
 
 
+# 0.5.25: üst bilginin OCR'da tutmayan ilk kelimeleri ("HADİS RİVAYETLERİNİN") silinen yerin önünde kalmasın
+_UST_KALINTI = re.compile(r"(?:\b[A-ZÇĞİÖŞÜÂÎÛ]{2,}\s+){1,3}[A-ZÇĞİÖŞÜÂÎÛ]{2,}\s*(?=\u0000)")
+
+
 def satir_ici_ust_bilgileri_sil(p, basliklar):
     if not basliklar:
         return p
@@ -80,12 +84,14 @@ def satir_ici_ust_bilgileri_sil(p, basliklar):
         baslik = (m.group(2) or m.group(3) or "").strip()
         return "\u0000" if baslik in basliklar else m.group(0)
     p = _UST_BILGI.sub(degis, p)
+    p = _UST_KALINTI.sub("\u0000", p)
     # silinen yerde bölünmüş kelime kaldıysa birleştir: "ar \0 tik" -> "artık"
     def onar(m):
         sol, sag = m.group(1), m.group(2)
         b = _birlesik(sol, sag)
         return b if b else f"{sol} {sag}"
-    p = re.sub(r"([^\W\d_]+)\s*\u0000\s*([a-zçğıöşüâîû]+)", onar, p)
+    p = re.sub(r"([^\W\d_]+)\s*\u0000\s*([a-zçğıöşüâîû]+)",
+               lambda m: f"{m.group(1)} {m.group(2)}" if m.group(1).isupper() and len(m.group(1)) > 1 else onar(m), p)
     return re.sub(r"\s*\u0000\s*", " ", p)
 
 
@@ -321,3 +327,10 @@ def bolunmus_kelimeleri_birlestir(p):
         out.append(w)
         i += 1
     return "".join(out)
+
+
+
+def _birlesik(sol, sag):
+    """0.5.25: birleştirme kararı sözlükle verilir ama harfler değişmez: parçalar olduğu gibi yapıştırılır
+    ("lâ- zım" -> "lâzım", "ısı- nın" -> "ısının"; önceden sözlükteki hâl dönüyordu: "lazım", "işinin")."""
+    return (sol + sag) if _birlesik_sozluk(sol, sag) else None

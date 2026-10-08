@@ -44,7 +44,8 @@ def ciktiya_yaz(kit, epublar, epub_klasoru, onceki=None):
         os.makedirs(CIKTI, exist_ok=True)   # /dedplay bağlı, EPUB klasörü henüz yok (tur 2/D)
     temel = dosya_adi(kit)
     ad, n = temel, 1
-    while any(os.path.exists(os.path.join(CIKTI, KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"])), ad + ".epub"))
+    # 0.5.25: aynı kitap yeniden işlenince eski EPUB'ın üzerine yazılır ("(2)" kopyası olmaz)
+    while False and any(os.path.exists(os.path.join(CIKTI, KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"])), ad + ".epub"))
               and os.path.join(KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"])), ad + ".epub") not in (onceki or [])
               for e in epublar):
         n += 1                              # aynı adlı başka bir kitabın dosyası: üstüne yazma (tur 2/D)

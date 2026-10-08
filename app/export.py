@@ -237,3 +237,17 @@ def build(job, parts, fmt, variant):
     if job["status"] != "done":
         base += " (kısmi)"
     return fn(job, parts, variant), media, f"{base}.{fmt}"
+
+
+# 0.5.25: Word'e giden her yazı, hangi yoldan gelirse gelsin, XML'e aykırı karakterlerden temizlenir
+try:
+    from docx.text.paragraph import Paragraph as _DocxParagraf
+    if not getattr(_DocxParagraf.add_run, "_temiz", False):
+        _orj_add_run = _DocxParagraf.add_run
+
+        def _temiz_add_run(self, text=None, style=None):
+            return _orj_add_run(self, _xml_temiz(text) if isinstance(text, str) else text, style)
+        _temiz_add_run._temiz = True
+        _DocxParagraf.add_run = _temiz_add_run
+except Exception:
+    pass

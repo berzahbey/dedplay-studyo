@@ -3176,6 +3176,31 @@ def _ek_birlestir(t):
     return _KURAN.sub(lambda m: "Kur'an" + ("'" + m.group(1) if m.group(1) else ""), t)
 
 
+_ARSIV_ORTAK = None
+
+
+def _arsiv_ortaklari():
+    """0.5.26: arşivdeki "A - B" dosya adlarında her tarafın birlikte geçtiği farklı ortaklar. Yazar birden çok eserle
+    geçer (Bediuzzaman Said Nursi: Tilsimlar, Zulfikar…), eser tek yazarla; aynı kitabın PDF/EPUB kopyası tek sayılır."""
+    global _ARSIV_ORTAK
+    if _ARSIV_ORTAK is None:
+        from .katalog import sade
+        ortak = collections.defaultdict(set)
+        for kok, _, adlar in os.walk(os.environ.get("KAYNAK_DIR", "/kaynak")):
+            for ad in adlar:
+                if not ad.lower().endswith((".pdf", ".epub", ".docx", ".txt")):
+                    continue
+                govde = os.path.splitext(ad)[0].replace("_", " ").strip()
+                parca = govde.split(" - ", 1) if " - " in govde else re.split(r"\s{2,}", govde, 1)
+                if len(parca) == 2:
+                    a, b = sade(parca[0]), sade(parca[1])
+                    if a and b:
+                        ortak[a].add(b)
+                        ortak[b].add(a)
+        _ARSIV_ORTAK = ortak
+    return _ARSIV_ORTAK
+
+
 def _sira_duzelt(bilgi, ad_baslik, ad_yazar):
     """Dosya adı 'Eser - Yazar' sırasıyla yazılmışsa (beklenen 'Yazar - Eser') iki taraf yer değiştirir."""
     if not ad_yazar:
@@ -3184,6 +3209,11 @@ def _sira_duzelt(bilgi, ad_baslik, ad_yazar):
     if "&" in ad_baslik and "&" not in ad_yazar:
         return ad_yazar, ad_baslik
     if re.search(r"[(:]", ad_yazar) and not re.search(r"[(:]", ad_baslik):
+        return ad_yazar, ad_baslik
+    # 0.5.26: arşivde birden çok farklı eserle geçen taraf yazardır (Tilsimlar - Bediuzzaman Said Nursi)
+    from .katalog import sade
+    ortak = _arsiv_ortaklari()
+    if len(ortak.get(sade(ad_baslik), ())) >= 2 and len(ortak.get(sade(ad_yazar), ())) < 2:
         return ad_yazar, ad_baslik
     return ad_baslik, ad_yazar
 

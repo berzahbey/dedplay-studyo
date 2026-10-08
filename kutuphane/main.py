@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.26"
+SURUM = "0.5.27"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -122,9 +122,26 @@ def kaynak_gez(yol: str = ""):
     return {"yol": os.path.relpath(tam, KAYNAK) if tam != os.path.realpath(KAYNAK) else "", "klasor": klasor, "dosya": dosya}
 
 
+def _ayni_adli_kitap(gorunen_ad):
+    """0.5.26: dosya adı (uzantısız) listedeki bir kitabın kaynak dosyasının adıyla birebir aynıysa o kitabın kimliği:
+    kitap nereden verilirse verilsin aynı kayıt, aynı Stüdyo işi, biçimler üzerine yazılır."""
+    try:
+        from .katalog import sade
+    except ImportError:
+        from kutuphane.katalog import sade
+    hedef = sade(os.path.splitext(os.path.basename(gorunen_ad))[0])
+    for k in depo.liste():
+        yol = depo.durum_oku(k["kimlik"]).get("kaynak_kimlik") or ""
+        if os.path.isabs(yol) and sade(os.path.splitext(os.path.basename(yol))[0]) == hedef:
+            return k["kimlik"]
+    return None
+
+
 def _dosya_isi(yol, gorunen_ad):
     import time
     kid = kaynak.kimlik_uret(yol)
+    if not depo.durum_oku(kid):  # 0.5.26: aynı adlı kitap başka yerden verildiyse o kitap güncellenir
+        kid = _ayni_adli_kitap(gorunen_ad) or kid
     ilk = depo.durum_oku(kid)
     baslik, yazar = kaynak._dosya_adindan(gorunen_ad)
     depo.is_ekle("dosya", kid, yol, tur="dosya", kaynak_kimlik=yol, baslik=ilk.get("baslik") or baslik,

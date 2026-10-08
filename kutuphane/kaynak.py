@@ -1448,9 +1448,10 @@ def _notlari_bol(dip_paras):
 
 
 # ======================= PDF: basılı içindekilerden fihrist =======================
-_TOC_SATIR = re.compile(r"^(?P<t>.*?\S)\s*(?:(?:…\s?|(?:[.·•_]\s?){2,})+[^\d]{0,15}?|\s)\s*(?P<n>\d{1,4})[\s,;'’`]{0,4}$")
+# (?>...) atomik: uzun nokta dizisinde üstel geri izleme olmasın (Kur'an Çevirilerinin Dünyası, iki sütunlu içindekiler)
+_TOC_SATIR = re.compile(r"^(?P<t>.*?\S)\s*(?:(?>(?:…\s?|(?:[.·•_]\s?){2,})+)[^\d]{0,15}?|\s)\s*(?P<n>\d{1,4})[\s,;'’`]{0,4}$")
 _TOC_NOKTALI = re.compile(r"^(?P<t>.*?[^\W\d_].*?)\s*(?:[.…·•_]\s?){3,}")
-_TOC_ROMA = re.compile(r"^(?P<t>.*?\S)\s*(?:…\s?|(?:[.·•_\-–]\s?){2,})+\s*(?P<n>[ivxlcdmIVXLCDM]{1,7})\s*$")
+_TOC_ROMA = re.compile(r"^(?P<t>.*?\S)\s*(?>(?:…\s?|(?:[.·•_\-–]\s?){2,})+)\s*(?P<n>[ivxlcdmIVXLCDM]{1,7})\s*$")
 _TOC_ATLA = re.compile(r"^(sayfa|sahife|s\.|page|pp?\.)$", re.I)
 
 
@@ -1603,7 +1604,7 @@ def icindekiler_girdileri(sayfa_satirlari):
     for rows in sayfa_satirlari:
         for r in _ayni_satir(rows):
             t = UST.sub(r" \1", r["text"]).strip()  # küçük puntolu numara dipnot işareti sanılmış olabilir
-            if not t or _icindekiler_basligi(t) or _TOC_ATLA.match(t):
+            if not t or len(t) > 250 or _icindekiler_basligi(t) or _TOC_ATLA.match(t):   # gerçek içindekiler satırı bu kadar uzun olmaz
                 continue
             if TS.PAGE_NUM.match(t):  # tek başına numara (aynı hizaya düşmemiş): hemen üstteki numarasız satırın
                 son = satirlar[-1] if satirlar else None

@@ -14,6 +14,22 @@ CHUNK = 20  # EPUB'da bir bölüm dosyasına kaç parça girsin
 LABEL = {"tr": "Türkçe", "osm": "Osmanlıca", "iki": "Türkçe ve Osmanlıca"}
 
 
+
+import re as _re
+_XML_BOSLUK = _re.compile(r"[\x0b\x0c]")
+_XML_YASAK = _re.compile(r"[\x00-\x08\x0e-\x1f\ufffe\uffff\ud800-\udfff]")
+def _xml_temiz(o):
+    if isinstance(o, str):
+        return _XML_YASAK.sub("", _XML_BOSLUK.sub(" ", o))
+    if isinstance(o, list):
+        return [_xml_temiz(x) for x in o]
+    if isinstance(o, tuple):
+        v = [_xml_temiz(x) for x in o]
+        return type(o)(*v) if hasattr(o, "_fields") else tuple(v)
+    if isinstance(o, dict):
+        return {k: _xml_temiz(v) for k, v in o.items()}
+    return o
+
 def _paras(text):
     return [p.strip() for p in re.split(r"\n+", text or "") if p.strip()]
 
@@ -214,6 +230,8 @@ SUFFIX = {"tr": "Türkçe", "osm": "Osmanlıca", "iki": "Türkçe-Osmanlıca"}
 
 
 def build(job, parts, fmt, variant):
+    job = _xml_temiz(job)
+    parts = _xml_temiz(parts)
     fn, media = FORMATS[fmt]
     base = f"{job['title']} - {SUFFIX[variant]}"
     if job["status"] != "done":

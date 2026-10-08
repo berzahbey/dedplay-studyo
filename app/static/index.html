@@ -246,6 +246,68 @@ $("jobs").addEventListener("click", async (e) => {
   lastJobs = ""; loadJobs();
 });
 
+// ---- toplu silme (seç / seçilenleri sil) ----
+const secili = new Set();
+let topluCubuk = null, topluBekle = false, topluZaman = null;
+function yaziKoy(el, t) { if (el.textContent !== t) el.textContent = t; }
+function topluKur() {
+  const isler = [...document.querySelectorAll(".job[data-id]")];
+  const kap = isler.length ? isler[0].parentElement : null;
+  if (!topluCubuk) {
+    topluCubuk = document.createElement("div");
+    topluCubuk.style.cssText = "display:flex;align-items:center;gap:12px;margin:8px 0;";
+    topluCubuk.innerHTML = '<label style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
+      '<input type="checkbox" id="hepsiniSec"> Hepsini seç</label><button type="button" id="seciliSil" disabled></button>';
+    topluCubuk.querySelector("#hepsiniSec").addEventListener("change", e => {
+      document.querySelectorAll(".job[data-id]").forEach(j => e.target.checked ? secili.add(j.dataset.id) : secili.delete(j.dataset.id));
+      topluKur();
+    });
+    topluCubuk.querySelector("#seciliSil").addEventListener("click", topluSil);
+  }
+  if (kap && topluCubuk.nextElementSibling !== kap) kap.parentNode.insertBefore(topluCubuk, kap);
+  topluCubuk.style.display = isler.length ? "flex" : "none";
+  const varolan = new Set(isler.map(j => j.dataset.id));
+  [...secili].forEach(id => varolan.has(id) || secili.delete(id));
+  isler.forEach(j => {
+    let k = j.querySelector(":scope > input.sec");
+    if (!k) {
+      k = document.createElement("input");
+      k.type = "checkbox"; k.className = "sec"; k.title = "Toplu silmek için seç";
+      k.style.cssText = "position:absolute;left:10px;top:14px;width:18px;height:18px;cursor:pointer;z-index:2";
+      k.addEventListener("click", e => e.stopPropagation());
+      k.addEventListener("change", () => { k.checked ? secili.add(j.dataset.id) : secili.delete(j.dataset.id); topluKur(); });
+      if (getComputedStyle(j).position === "static") j.style.position = "relative";
+      j.style.paddingLeft = "38px";
+      j.prepend(k);
+    }
+    k.checked = secili.has(j.dataset.id);
+  });
+  const b = topluCubuk.querySelector("#seciliSil");
+  if (!topluBekle) {
+    b.disabled = !secili.size;
+    yaziKoy(b, secili.size ? `Seçilenleri sil (${secili.size})` : "Seçilenleri sil");
+  }
+  topluCubuk.querySelector("#hepsiniSec").checked = isler.length > 0 && secili.size === isler.length;
+}
+async function topluSil() {
+  const ids = [...secili];
+  if (!ids.length || !confirm(`${ids.length} kitap Stüdyo listesinden silinsin mi? (Kitap Okuma'daki kayıt ve sesli kitap silinmez.)`)) return;
+  const b = topluCubuk.querySelector("#seciliSil");
+  topluBekle = true; b.disabled = true;
+  let hata = 0;
+  for (let i = 0; i < ids.length; i++) {
+    yaziKoy(b, `Siliniyor ${i + 1}/${ids.length}…`);
+    try { await api(`/api/jobs/${ids[i]}`, { method: "DELETE" }); secili.delete(ids[i]); } catch (e) { hata++; }
+  }
+  topluBekle = false;
+  if (hata) alert(`${hata} kitap silinemedi.`);
+  lastJobs = ""; loadJobs();
+}
+new MutationObserver(() => {
+  if (!topluZaman) topluZaman = requestAnimationFrame(() => { topluZaman = null; topluKur(); });
+}).observe(document.body, { childList: true, subtree: true });
+topluKur();
+
 // ---- yükleme: bilgisayar / sunucu ----
 let mode = "pc", srvData = null;
 const srvSel = new Set();

@@ -2309,6 +2309,20 @@ def _on_temizlik(ogeler):
         i += 1
     return out
 
+_WORD_YORUM = re.compile(rb"<!--.*?-->", re.S)
+_WORD_ALAN = re.compile(rb"<!\[if supportFields\]>.*?<!\[endif\]>", re.S)
+_WORD_ISARET = re.compile(rb"<!\[(?:if[^\]]*|endif)\]>")
+
+
+def _word_temizle(veri):
+    """Word'den dönüştürülmüş EPUB'lardaki gizli kodlar (koşullu yorumlar, alan kodları) metne sızmasın."""
+    if isinstance(veri, str):
+        veri = veri.encode("utf-8")
+    veri = _WORD_YORUM.sub(b"", veri)
+    veri = _WORD_ALAN.sub(b"", veri)
+    return _WORD_ISARET.sub(b"", veri)
+
+
 _BLOK = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "dd", "dt", "pre"]
 
 
@@ -2323,7 +2337,7 @@ def epub_oku(yol, ilerleme=None):
         item = book.get_item_with_id(idref)
         # bazı EPUB'lar .html sayfalarının türünü yanlış işaretler: uzantıya da bakılır
         if item and (item.get_type() == ITEM_DOCUMENT or item.get_name().lower().endswith((".html", ".htm", ".xhtml"))):
-            belgeler.append((os.path.basename(item.get_name()), BeautifulSoup(item.get_content(), "html.parser")))
+            belgeler.append((os.path.basename(item.get_name()), BeautifulSoup(_word_temizle(item.get_content()), "html.parser")))
     # 1) dipnot hedefleri: kısa (rakam, [1], *) bağlantıların gösterdiği öğeler
     hedef = {}
     for ad, soup in belgeler:
@@ -3031,7 +3045,8 @@ def _benzer(a, b):
 _PROGRAM_ADI = re.compile(
     r"design|adobe|acrobat|microsoft|office|word|writer|windows|abbyy|finereader|scan|tarayıcı|epson|canon|\bhp\b|"
     r"printer|bullzip|pdf|corel|quark|indesign|calibre|\buser\b|admin|owner|kullanıcı|bilgisayar|\bpc\b|www|\.com|"
-    r"unknown|bilinmiyor|anonymous|construction|default|untitled", re.I)
+    r"unknown|bilinmiyor|anonymous|construction|default|untitled|"
+    r"neşriyat|nesriyat|yayın|yayin|kitabevi|matbaa|basımevi|publish|press\b|kitaplığı", re.I)
 
 
 def _kisi_adi_mi(t):
@@ -3042,10 +3057,66 @@ def _kisi_adi_mi(t):
         len(t.split()) <= 6 and not _PROGRAM_ADI.search(t)
 
 
+_KOPUK_EK = re.compile(r"(?<=[^\W\d_]{2}) (ler|lar|leri|ları|lerin|ların|lerinin|larının|nin|nın|nun|nün)\b", re.I)
+
+
+_KURAN = re.compile(r"\bKur'?an(ı|a|da|dan|ın|la|ında)?\b")
+
+
+def _kucuk_tr(w):
+    return w.replace("I", "ı").replace("İ", "i").lower()
+
+
+def _ek_birlestir(t):
+    """Kopmuş çoğul/ilgi eki birleştirilir: 'Ahlak Görüş Leri' -> 'Ahlak Görüşleri'."""
+    if not t:
+        return t
+    t = _KOPUK_EK.sub(lambda m: _kucuk_tr(m.group(1)), t)
+    return _KURAN.sub(lambda m: "Kur'an" + ("'" + m.group(1) if m.group(1) else ""), t)
+
+
+def _sira_duzelt(bilgi, ad_baslik, ad_yazar):
+    """Dosya adı 'Eser - Yazar' sırasıyla yazılmışsa (beklenen 'Yazar - Eser') iki taraf yer değiştirir."""
+    if not ad_yazar:
+        return ad_baslik, ad_yazar
+    my, mb = (bilgi.get("yazar") or "").strip(), (bilgi.get("baslik") or "").strip()
+    if my and _benzer(my, ad_baslik) and not _benzer(my, ad_yazar):
+        return ad_yazar, ad_baslik
+    if mb and _benzer(mb, ad_yazar) and not _benzer(mb, ad_baslik):
+        return ad_yazar, ad_baslik
+    if "&" in ad_baslik and "&" not in ad_yazar:
+        return ad_yazar, ad_baslik
+    return ad_baslik, ad_yazar
+
+
+def _ada_gore_birlestir(ad_baslik, kapak):
+    """ASCII dosya adı + kapak: kelime sırası ve büyük harf dosya adından, Türkçe harfler kapaktan.
+    'Dinler Tarihine Giris' + 'Dinler. tarihine giriş' -> 'Dinler Tarihine Giriş'."""
+    from .katalog import sade
+    anahtar = lambda w: sade(w).replace(" ", "")
+    kapakta = {}
+    for w in kapak.split():
+        w = w.strip(".,;:!?()[]\"“”")
+        if w:
+            kapakta.setdefault(anahtar(w), w)
+    out = []
+    for i, w in enumerate(ad_baslik.split()):
+        k = kapakta.get(anahtar(w))
+        if not k:
+            out.append(turkcelestir(w))
+            continue
+        k = _kucuk_tr(k)
+        if w[:1].isupper() and not (i and k in _KUCUK_KAL):
+            k = {"i": "İ", "ı": "I"}.get(k[0], k[0].upper()) + k[1:]
+        out.append(k)
+    return " ".join(out)
+
+
 def _kunye_sec(bilgi, ad_baslik, ad_yazar, dosya_koku):
     """Eser adı: kapaktaki başlık (Türkçe harfleriyle; dosya adıyla uyuşuyorsa) > PDF/EPUB bilgi alanı (dosya adının
     kopyası değilse) > dosya adı. Yazar: bilgi alanı (eser adıyla aynı değilse) > dosya adındaki 'Yazar - Eser'."""
     from .katalog import sade
+    ad_baslik, ad_yazar = _sira_duzelt(bilgi, ad_baslik, ad_yazar)
     # bilgi alanı ancak dosya adındaki "Yazar - Eser"in birleşik kopyasıysa atılır; sadece eser adıysa (çoğu zaman
     # Türkçe harfleriyle daha doğru yazılmıştır) tercih edilir
     kopya = lambda s: bool(ad_yazar) and sade(s) == sade(ad_yazar + " " + ad_baslik)
@@ -3059,10 +3130,15 @@ def _kunye_sec(bilgi, ad_baslik, ad_yazar, dosya_koku):
     if not ad_baslik.isascii():  # dosya adında Türkçe harfler var: kullanıcının verdiği düzgün ad, en güvenilir kaynak
         ek = r"(nin|nın|nun|nün|in|ın|un|ün|a|e|ya|ye|da|de|ta|te|dan|den|tan|ten|la|le|yla|yle|ı|i|u|ü|yı|yi|yu|yü)"
         duzgun = lambda t: re.sub(r"(?<=[^\W\d_])-(?=" + ek + r"\b)", "’", re.sub(r"\s+([)\]])", r"\1", t)).strip()
-        yazar = meta_y if meta_y and not kopya(meta_y) else turkcelestir(ad_yazar)
-        return duzgun(ad_baslik), duzgun(yazar)
+        if ad_yazar and (not meta_y or set(sade(meta_y).split()) <= set(sade(ad_yazar).split())):
+            yazar = turkcelestir(ad_yazar)  # dosya adındaki yazar daha eksiksiz (ör. iki yazarlı kitap)
+        else:
+            yazar = meta_y if meta_y and not kopya(meta_y) else turkcelestir(ad_yazar)
+        return _ek_birlestir(duzgun(ad_baslik)), duzgun(yazar)
     kapak = _kapak_sec(satirlar, ad_baslik if ad_yazar else "")  # dosya adı "Yazar - Eser" değilse karşılaştırılamaz
-    if kapak:
+    if kapak and ad_yazar:
+        baslik = _ada_gore_birlestir(ad_baslik, kapak)  # sıra dosya adından, Türkçe harfler kapaktan
+    elif kapak:
         baslik = turkce_baslik(kapak)
     elif meta_b and not kopya(meta_b):
         baslik = meta_b
@@ -3072,7 +3148,7 @@ def _kunye_sec(bilgi, ad_baslik, ad_yazar, dosya_koku):
         yazar = meta_y
     else:
         yazar = turkcelestir(ad_yazar)
-    return turkce_onar(baslik), turkce_onar(yazar)
+    return _ek_birlestir(turkce_onar(baslik)), turkce_onar(yazar)
 
 
 def _kapak_sec(satirlar, ad_baslik):
@@ -3190,6 +3266,9 @@ def _dosya_adindan(yol):
     if " - " in ad:
         yazar, baslik = ad.split(" - ", 1)
         return baslik.strip(), yazar.strip()
+    m = re.match(r"^(\S.*?\S)\s{2,}(\S.*)$", ad)  # "Yazar  Eser" (çift boşlukla ayrılmış)
+    if m:
+        return m.group(2).strip(), m.group(1).strip()
     return ad, ""
 
 

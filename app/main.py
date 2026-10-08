@@ -179,7 +179,7 @@ def kutuphane_isi(baslik, osm_baslik, parcalar):
     title = _re.sub("[" + _re.escape(chr(92) + "/:*?" + chr(34) + "<>|") + "]+", " ", k.title or "")
     title = _re.sub(r"\s+", " ", title).strip(" .")[:120] or "Kütüphane kitabı"   # EPUB adıyla aynı uzunluk
     temel, n = title, 1
-    while db.q("SELECT 1 FROM jobs WHERE book_name=? OR title=?", (title, title), one=True):
+    while db.q("SELECT 1 FROM jobs WHERE (book_name=? OR title=?) AND status != 'done'", (title, title), one=True):
         n += 1                               # tur 2/D: aynı adlı başka iş varsa çıktılar üst üste yazılmasın
         title = f"{temel} ({n})"
     name = title + ".epub"

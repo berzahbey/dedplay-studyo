@@ -1477,7 +1477,8 @@ def _dipnot_ayir(rows, h, govde):
         for j in range(k - 1, 0, -1):
             if rows[j]["top"] < h * 0.35:
                 break
-            if rows[j]["top"] - rows[j - 1]["bot"] > govde * 1.5 and _kucuk_blok(rows[:j], rows[j:k], govde):
+            if rows[j]["top"] - rows[j - 1]["bot"] > govde * 1.5 and _kucuk_blok(rows[:j], rows[j:k], govde) and \
+                    _dar_blok(rows[:k], j, govde) is not False:  # 0.5.35: ara başlık + gövde satırları (s.302) değil
                 bas = j
                 break
         if rows[bas]["top"] - rows[bas - 1]["bot"] > govde * 0.8:
@@ -1487,9 +1488,32 @@ def _dipnot_ayir(rows, h, govde):
         # 0.5.16: Surya sayfasında Stüdyo'nun punto kuralı kullanılmaz (sayfa sonundaki kısa "dirler." satırını dipnot
         # sanıyordu); yalnız önceki sayfadan taşan devamdan oluşan dipnot: alt kısımda büyük boşluktan sonra gelen,
         # gövdeden belirgin küçük puntolu blok
-        for k in range(3, len(rows)):
-            if rows[k]["top"] > h * 0.45 and rows[k]["top"] - rows[k - 1]["bot"] > govde * 1.5 and \
-                    _kucuk_blok(rows[:k], rows[k:], govde):
+        for k in range(1, len(rows)):
+            if rows[k]["top"] - rows[k - 1]["bot"] <= govde * 1.2:
+                continue
+            eski = k >= 3 and rows[k]["top"] > h * 0.45 and rows[k]["top"] - rows[k - 1]["bot"] > govde * 1.5 and \
+                _kucuk_blok(rows[:k], rows[k:], govde)
+            # 0.5.35: numaralı/yıldızlı not, numarası üstte atıf olarak geçiyor ve yazısı küçük ("5 Fatih…", "25. Cengiz…")
+            o = lambda rs: sorted(r["h"] for r in rs)[len(rs) // 2]
+            isaret = rows[k]["top"] > h * 0.45 and _isaretli_not(rows[k]["text"], " ".join(r["text"] for r in rows[:k])) \
+                and o(rows[k:]) < o(rows[:k]) * 0.97
+            dar = _dar_blok(rows, k, govde)
+            if dar is None:  # satır aralığı ölçülemiyor: eski kural; ama tek satırlık ara başlık dipnot başı değil
+                ilk_blok = _bitisik_blok(rows, k, None, govde)
+                karar = (eski and (len(ilk_blok) >= 2 or k + len(ilk_blok) == len(rows))) or isaret
+            elif dar:  # satır aralığı dar: dipnot; uzun dipnot devamı sayfanın üst yarısında da başlayabilir (s.69-70)
+                ilk_blok = _bitisik_blok(rows, k, None, govde)
+                gen = lambda rs: sorted(r["x1"] - r["x0"] for r in rs)[len(rs) // 2]
+                ust_dolu = [r for r in rows[:k] if r["n"] >= 4]
+                # tam genişlikte satırlar ya da numarayla başlayan not; başlık, imza, kapak yazısı, forma işareti değil
+                bicim = ((ust_dolu and gen(ilk_blok) >= gen(ust_dolu) * 0.6) or
+                         re.match(r"^\s*(?:\ue000\d|[(\[]?\d{1,3}(?:\s?[-–.)\]]|\s+(?=[A-ZÇĞİÖŞÜÂÎÛ]))|\*)", rows[k]["text"])) \
+                    and not _buyuk_harfli(rows[k]["text"])
+                karar = (bicim and (rows[k]["top"] > h * 0.45 or (rows[k]["top"] > h * 0.12 and len(rows) - k >= 6))) \
+                    or eski or isaret  # biçim tutmazsa eski karar (yalnız ekleme kısıtlanır, eski dipnot kaybolmaz)
+            else:  # satır aralığı gövdeninki gibi: ancak dipnot işaretiyle başlıyorsa
+                karar = isaret
+            if karar:
                 return rows[:k], rows[k:]
         ana, dip = rows, []
     else:
@@ -1519,6 +1543,76 @@ def _kucuk_blok(ust, alt, govde):
         return False
     o = lambda rs: sorted(r["h"] for r in rs)[len(rs) // 2]
     return o(alt) < o(ust) * 0.9 and o(alt) < govde * 0.95
+
+
+def _bitisik_blok(rows, bas, son, govde):
+    """0.5.35: rows[bas:son] içinde bas'tan ileri (son None) ya da son'dan geri (bas None) boşluksuz uzanan satırlar."""
+    if son is None:
+        j = bas + 1
+        while j < len(rows) and rows[j]["top"] - rows[j - 1]["bot"] <= govde * 1.2:
+            j += 1
+        return rows[bas:j]
+    j = son - 1
+    while j > 0 and rows[j]["top"] - rows[j - 1]["bot"] <= govde * 1.2:
+        j -= 1
+    return rows[max(j, 0):son]
+
+
+def _satir_araligi(rows, govde):
+    """0.5.35: dolu satırların (en az 3 kelime, başlık boyunda değil) art arda üstleri arasındaki ortanca uzaklık; ölçülemezse
+    None. Surya'da satır yüksekliği harflere göre çok oynar (Dinde Kırk Prensip: dipnot 14-21, gövde 17-26 pt), satır
+    aralığı oynamaz (gövde 26-29, dipnot 21 pt)."""
+    dolu = [r for r in rows if r["n"] >= 2 and r["h"] <= govde * 1.5 and not _arapca_satir(r["text"])
+            and not _buyuk_harfli(r["text"])]
+    farklar = sorted(b["top"] - a["top"] for a, b in zip(dolu, dolu[1:])
+                     if 0 < b["top"] - a["top"] < 1.8 * max(a["h"], b["h"]))
+    return farklar[len(farklar) // 2] if farklar else None
+
+
+def _dar_blok(rows, k, govde):
+    """0.5.35: rows[k]'den başlayan bitişik blok, hemen üstündeki bitişik bloktan belirgin dar satır aralıklı mı (dipnot).
+    Yalnız ilk bitişik blok ölçülür (altındaki gerçek dipnotlar başlıktan sonraki gövdeyi dar göstermesin); üstte de yalnız
+    son bitişik blok (başlıklar ölçüyü bozmasın). Ölçülemezse None."""
+    alt = _bitisik_blok(rows, k, None, govde)
+    pa, ust, pu, son = _satir_araligi(alt, govde), [], None, k
+    for _ in range(4):  # üstte ölçülebilen ilk blok (başlık, âyet satırı, tek satır atlanır)
+        if son <= 0:
+            break
+        ust = _bitisik_blok(rows, None, son, govde)
+        pu = _satir_araligi(ust, govde)
+        if pu is not None:
+            break
+        son -= len(ust)
+    if pu is None or pa is None:
+        return None
+    o = lambda rs: sorted(r["h"] for r in rs)[len(rs) // 2]
+    # dipnot sayfanın altındadır: dar blok sayfanın (ya da verilen satırların) sonuna kadar uzanmalı
+    return pa < pu * 0.88 and o(alt) <= o(ust) and k + len(alt) == len(rows)
+
+
+def _buyuk_harfli(t):
+    """0.5.35: başlık satırı: harflerin çoğu büyük ("YOL GİDENLERİN", "ÖNSÖZ")."""
+    harf = [c for c in t if c.isalpha()]
+    return len(harf) >= 3 and sum(1 for c in harf if c.isupper()) > len(harf) * 0.7
+
+
+def _arapca_satir(t):
+    """0.5.35: satırın harflerinin çoğu Arap harfi mi (satır aralığı ölçüsüne katılmaz)."""
+    harf = [c for c in t if c.isalpha()]
+    return bool(harf) and sum(1 for c in harf if "\u0600" <= c <= "\u06FF") > len(harf) / 2
+
+
+def _isaretli_not(ilk, ust_metin):
+    """0.5.35: satır dipnot işaretiyle başlıyor ve işaret üstteki metinde atıf olarak geçiyor mu ("2 Habib…" / "olunur2",
+    "* Cahiliye…" / "giymezse *")."""
+    m = re.match(r"^\s*(?:\ue000(\d{1,3})\ue001|[(\[]?(\d{1,3})[)\]]?(?=[\s.\-–])|(\*{1,3}))", ilk)
+    if not m:
+        return False
+    if m.group(3):
+        return m.group(3) in ust_metin
+    no = m.group(1) or m.group(2)
+    return ("\ue000" + no + "\ue001") in ust_metin or bool(
+        re.search(r"[^\W\d_][.,;!?\"”»’')]{0,3}\s?[(\[]?" + no + r"(?!\d)", ust_metin))  # ":" değil ("vardır: 1." listedir)
 
 
 _NOT_BASI_TIRE = re.compile(r"^\s*(?:\ue000(\d{1,3})\ue001\s*[-–]?|(\d{1,3})\s?[-–])\s*[\"“«'‘]?[^\W\d]")  # 0.5.15/16

@@ -3056,6 +3056,77 @@ def _dile_tasi(kit, dil):
     return kit
 
 
+# 0.5.31: kitap içi OCR onarımı. Eski ABBYY katmanı ve Surya belli harfleri karıştırır (rı→nn, ın→m, lı→h, b→h, l→h, e→c,
+# m→rn, ü→ii; ı/i, ş/s, ç/c, ğ/g, ü/u, ö/o kaybı). Geçersiz bir kelime tek bir karışmayı geri alınca geçerli bir kelimeye
+# dönüyorsa ve o kelime KİTABIN KENDİSİNDE en az 2 kez geçiyorsa düzeltilir (varhk → varlık, vc → ve, giybet → gıybet,
+# vucut → vücut). Aday tek olmalı. Osmanlıca sözlüğündeki kelimelere (adl, ahd, akl, mizac: Arapça terim, eski imlâ),
+# Roma rakamlarına ve büyük harfli kelimelere dokunulmaz. Yalnız PDF (katman ya da OCR), Türkçe kitap.
+_KARISMA = [("nn", "rı"), ("nn", "rın"), ("nn", "ın"), ("m", "ın"), ("rn", "m"), ("ii", "ü"), ("vc", "ve"), ("hir", "bir"),
+            ("hi", "bi"), ("ih", "ib"), ("h", "lı"), ("h", "li"), ("h", "l"), ("h", "b"), ("c", "e"), ("i", "ı"), ("ı", "i"), ("s", "ş"), ("c", "ç"),
+            ("g", "ğ"), ("u", "ü"), ("o", "ö"), ("l", "ı"), ("t", "i")]
+_IKI_HARFLI = {"vc", "cn", "kı"}
+_korunan = None
+
+
+def _korunan_kelimeler():
+    global _korunan
+    if _korunan is None:
+        try:
+            yol = os.path.join(os.path.dirname(os.path.abspath(__file__)), "korunan_kelimeler.txt")
+            _korunan = {s.strip() for s in open(yol, encoding="utf-8") if s.strip() and not s.startswith("#")}
+        except OSError:
+            _korunan = set()
+    return _korunan
+
+
+def _kucuk_tr_kelime(w):
+    return w.replace("I", "ı").replace("İ", "i").lower()
+
+
+def _kitap_ici_onar(metinler):
+    kel_re = re.compile(r"(?<![\w'’])[^\W\d_]+")
+    sayi = collections.Counter(_kucuk_tr_kelime(m.group()) for t in metinler for m in kel_re.finditer(t or ""))
+    sozluk = DZ._sozluk()[0]
+    korunan = _korunan_kelimeler()
+    gecerli = lambda w: w in sozluk or DZ.gecerli_mi(w)
+    esle = {}
+    for w, n in sayi.items():
+        if (len(w) < 3 and w not in _IKI_HARFLI) or w in korunan or w in sozluk or \
+                (w not in _IKI_HARFLI and re.fullmatch(r"[ivxlcdmı]+", w)) or gecerli(w):
+            continue
+        adaylar = set()
+        for a, b in _KARISMA:
+            i = w.find(a)
+            while i >= 0:
+                c = w[:i] + b + w[i + len(a):]
+                if c != w and sayi.get(c, 0) >= 2 and gecerli(c):
+                    adaylar.add(c)
+                i = w.find(a, i + 1)
+        if len(adaylar) == 1:
+            esle[w] = adaylar.pop()
+    if not esle:
+        return metinler
+
+    def degis(m):
+        k = m.group()
+        if k.isupper() and len(k) > 1:
+            return k  # büyük harfli başlık: _turkce_kelime_onar'ın işi
+        y = esle.get(_kucuk_tr_kelime(k))
+        if not y:
+            return k
+        if k[0].isupper():
+            y = ("İ" if y[0] == "i" else "I" if y[0] == "ı" else y[0].upper()) + y[1:]
+        return y
+    yeni = [kel_re.sub(degis, t) if t else t for t in metinler]
+    for e, y in zip(metinler, yeni):
+        if e != y:
+            try:
+                R.fark(e, y, "kitap içi onarım")
+            except Exception:
+                pass
+    return yeni
+
+
 def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     ogeler = _basliklari_denetle(ogeler)
     _seviyeler(ogeler)
@@ -3119,6 +3190,9 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
                 ogeler[i] = dict(ogeler[i], metin=m)
     duz = _duzelt([o["metin"] for o in ogeler], onar)
     notlar = dict(zip(notlar, _duzelt(list(notlar.values()), onar, "dipnot"))) if notlar else {}
+    if not metin_kaynagi and dil == "tr":  # 0.5.31: OCR'ın harf karışmaları, kitabın kendi kelimeleriyle
+        hepsi = _kitap_ici_onar(duz + list(notlar.values()))
+        duz, notlar = hepsi[:len(duz)], dict(zip(notlar, hepsi[len(duz):]))
     kit = K.yeni(kunye)
     tasinan = []  # atılan paragraftaki sayfa işaretleri sonrakine geçer
     for o, metin in zip(ogeler, duz):

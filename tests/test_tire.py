@@ -83,4 +83,19 @@ govde = [r["text"] for rows in sonuc for r in rows if "edilebilen" in r["text"]]
 dene("dipnot numarası korunur", all(t.startswith("(") for t in dipler) and len(dipler) == 10)
 dene("gövdedeki kenar numarası silinir", all(t.startswith("edilebilen") for t in govde))
 
+# 6) 0.5.31 kitap içi OCR onarımı: doğru kelime kitabın kendisinde en az 2 kez geçmeli
+from app import duzelt as DZ
+if DZ._an() is not None:
+    m = ["Bu varlık ve o varlık ile", "Varhk ve yokluk vc birlik", "adl ile adı ve adı", "XXI. asır, xxı", "VARHK başlığı",
+         "giybet etme, gıybet ve gıybet", "tek bir hatasz kelime"]
+    y = S._kitap_ici_onar(m)
+    dene("onarım: varhk -> Varlık (büyük harf korunur), vc -> ve", y[1] == "Varlık ve yokluk ve birlik")
+    dene("onarım: Osmanlıca sözlükteki kelimeye dokunulmaz (adl)", y[2] == "adl ile adı ve adı")
+    dene("onarım: Roma rakamı ve büyük harfli başlık değişmez", y[3] == m[3] and y[4] == m[4])
+    dene("onarım: giybet -> gıybet", y[5] == "gıybet etme, gıybet ve gıybet")
+    dene("onarım: kitapta 2 kez geçmeyen aday kullanılmaz", y[6] == m[6])
+    dene("onarım: temiz metin aynen", S._kitap_ici_onar(["Bu temiz bir cümledir.", "Bir cümle daha."]) == ["Bu temiz bir cümledir.", "Bir cümle daha."])
+else:
+    print("ATLANDI onarım testleri (Zemberek yok)")
+
 print("SONUC: HEPSI GECTI" if not kalan else f"SONUC: {len(kalan)} TEST KALDI")

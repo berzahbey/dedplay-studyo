@@ -1,0 +1,18 @@
+K2 = ["O halde öğrenmekte acele et. Tembellikten kaçın. Yoksa Allah korusun dalâlete düşersin!..[İlim mevzuunda sözün kısası: |",
+ "أَفَمَنْ يَمْشِي مُكِّبًا عَلَىٰ وَجْهِهِ أَهْدَى أَمَنْ يَمْشِي سَوِيّاً",
+ "ŞÖHRET DÜŞKÜNÜ OLMAMAKTIR\\| \\bigtriangleup \\|\\bigtriangleup \\bigtriangleup \\bigtriangleup \\bigtriangleup \\bigtriangleup",
+ "TEVBE ETMEKTİR1","ع۳۳ ى ف","َ ی ن","ک ؽؘ ن ع۱۲","ع۱۹ ى","ءَ ه","۱۰۱ د ا ۱ د ۱ ۱ ۱","ىpك â.","۲ م ۲ MYJ9 ETAV ( ۳ )",
+ "7172.0.277 7.7., ى इची I **** :: Ħ × 100 a pro",
+ "6 jlJ)' ^ irü t-LT o Iİ_lU i ^ tL' İJL^'ı' en-Necm sûresi/29",
+ "AUo/ı'a itaate kar§ıhk miÂafatlan(hrma vardır.","BIRLEŞIK KıYASLAR","ZAHIRÎ IDRAKLARıN GERÇEKLIĞI",
+ "V. DeUI","D. Bekir KaHığa","V. DELîL","Brockelmann, GAL, I, 421, M, Bouyges, A.g.e. P. 80)",
+ "Burslan, Kivameddîn: 369 Aristoteles: 1x, xxv, xxv, xxv, 2,","xx, 242, 243 Bağdat: xx, xxvi, xxviii, 218, 221, 222,",
+ "Fedâlh el-BâtmIyye (İmâm Ğazzâli);","94. Feyzu'lKadîr, c. II, s. 220, Camiu's-Sagîr, c. I, s. 5","2. C,6, b. Güzel Ahlak *. &&",
+ "elVAHHÂB","elTETTAH","elMJGNI r","t s 0 elVARİS r","Ju *2 J>\\ ehREŞİD"]
+C2 = ["AA911111119111AA91A11A1111AoA 11911 1719","YE1 10Y 10E1Y 10 E YY 1 E 9 Y","VYOYYI qVAYYYOI + IIEIYIV","222 ccc 222-111222 cccc dd bb",
+ "V ili iîûjlii ollîl Jliî l-Sıl",", ^ ^ tr ^ C/f <..Jp","•,û) jı;^5>>","• j l :. cocJüj","iy4i S/ Qîî","' j fLJ!3 il","Vİ—-İ1 j y ^ J",
+ "İL__ü'jG’J. ‘^ \\ t\"' ^","^ lIyLp t jj","l'j s JU Jİl, Çyj\\ V li'","iT^lı \\'j:","on;- ^ ^ 'Olİ","•i;İ Î5p. jâi jLÜ -it",
+ "jj Ji. ^'}i\\ ^ 'j, lij","J/-İ »ü","Jij ^\"^'j ı^'^\" vL^","Ji. LİL4 üic^ij \\Jîry i4ij o-f '4^'*.^. uij",
+ "oo oo ooo ooo ooo ooo","oo oo","î 11 1 ı S u 1 13 16 i","•iii,^-,„","101' a CaracteriaAltres de CaracteriaAltres de Caracteria",
+ "123' a ta KalendariManazarta","• M - ' - J> -oC' - ir > -â j > yysjiyO ji io Jo",".0^*11,l£Xİ\\.^<^>«11","j j > jî fc / g î",
+ ". ^ ^ o jÇ il'","> ü JÎ hJJİs*",">li JJÜ.I","İ£Xİ\\ \\A\\","U ojPOL_İ Aj","\" Ö \\ ç o } D. O u Z C f o f t / » —* / —» ı ı. ^ H"]

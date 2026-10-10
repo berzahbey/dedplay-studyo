@@ -3250,6 +3250,83 @@ def _kitap_ici_onar(metinler):
     return yeni
 
 
+# 0.5.33: Arapça yazının (ve vefk tablolarının) Türkçe OCR'ından kalan Latin harfli çöp
+# ("jj Ji. ^'}i\\ ^ 'j, lij", "YE1 10Y 10E1Y 10 E YY", "222 ccc cccc dd bb"). Arap harfi içeren satıra dokunulmaz (sürüm 2).
+_OC_HAREKE = re.compile(r"[\u064B-\u065F\u0670\u0640]")
+_OC_AR_HARF = re.compile(r"[\u0621-\u064A\u0671-\u06D3\u06FA-\u06FF\uFB50-\uFDFF\uFE70-\uFEFF]")
+_OC_TUHAF = re.compile(r"[\^\\{}<>£¥`|~•¬§+]")
+_OC_UNLU = "aeıioöuüâîûêôAEIİOÖUÜÂÎÛÊÔ"
+_OC_SAPKA = "âîûêôÂÎÛÊÔ"
+_OC_BOL = re.compile(r"[\s\-/.,;:()\"'’‘“”«»!?\[\]*=]+")
+_OC_ATIF = re.compile(r"s[ûu]re|âyet|ayet|\b(?:c|s|h|b|bk|bkz|vr|no|ay)\.\s*[IVX\d]", re.I)
+_OC_ROMA = re.compile(r"[IVXLC]+|[ivxlc]+")
+
+
+def _oc_iyi(x):
+    k = DZ._kucuk(x)
+    return DZ.gecerli_mi(k) or (len(x) >= 3 and DZ._kelime_mi(k))
+
+
+def _oc_belirti(t):
+    """Kelime parçasında kesin çöp belirtisi var mı."""
+    if _OC_TUHAF.search(t):
+        return True
+    harf = re.sub(r"[\W_]", "", t)
+    if not harf:
+        return False
+    roma = _OC_ROMA.fullmatch(harf)
+    if re.search(r"[^\W\d_]", harf) and re.search(r"\d", harf) and not re.fullmatch(r"\d+[^\W\d_]{0,4}", harf):
+        m = re.fullmatch(r"([^\W\d_]{3,})\d{1,3}", harf)
+        if not (m and _oc_iyi(m.group(1))):
+            return True   # harf ve rakam karışık: 10E1Y, MYJ9, i4ij (23a, 3üncü, dipnot numaralı ETMEKTİR1 değil)
+    if re.search(r"([^\W\d_])\1\1", harf, re.I) and not roma:
+        return True   # aynı harf üç kez: YYY, ccc (Roma rakamı III, xxx değil)
+    if re.search(r"(\d)\1\1\1", harf):
+        return True   # aynı rakam dört kez: 1111
+    if len(harf) >= 2 and len(set(harf.lower())) == 1 and not roma:
+        return True   # EE, YY, dd, bb (Roma rakamı II, xx değil)
+    harfler = [c for c in harf if c.isalpha()]
+    cogu_buyuk = sum(c.isupper() for c in harfler) >= 0.7 * len(harfler)   # BIRLEŞIK KıYASLAR, elVAHHÂB
+    onekli = re.fullmatch(r"[a-zçş]{1,2}[A-ZÇĞİŞÖÜÂÎÛ][a-zçğışöüâîû]+", harf)   # 'lKadîr (Arapça harf-i tarif)
+    if not cogu_buyuk and not onekli and re.search(r"[a-zçğışöüâîû][A-GJ-TV-ZÇĞİŞÖÜÂÎÛ]", harf):
+        return True   # içeride küçükten büyüğe: iT, vL, qV (OCR'ın l/li -> H, I, U karışması değil: KaHığa, BâtmIyye)
+    if any(sum(c in _OC_SAPKA for c in x) >= 2 for x in re.findall(r"[%s]{3,}" % _OC_UNLU, harf)):
+        return True   # iîû
+    return False
+
+
+def _ocr_copu(p):
+    """Arapçanın Türkçe OCR'ından kalan Latin harfli çöp mü (kısa yazı; gerçek Türkçe/transkripsiyon/kaynakça kalır)."""
+    if not p or len(p) > 200 or DZ._an() is None:
+        return False
+    if _OC_AR_HARF.search(_OC_HAREKE.sub("", p)) or _OC_ATIF.search(p) or re.search(r"\\[a-zA-Z]{3,}", p):
+        return False  # Arap harfi, âyet/sayfa atfı, LaTeX (Surya uydurması: _surya_uydurma temizler)
+    parcalar = [x for x in _OC_BOL.split(p) if x and not x.isdigit()]
+    if not parcalar:
+        return False
+    kotu, guclu, iyi, iyi3, tek = 0.0, 0, 0, 0, 0
+    for x in parcalar:
+        if _oc_belirti(x):
+            kotu += 2 if len(x) >= 8 else 1
+            guclu += 1
+        elif len(x) == 1:
+            if x not in "oaeOAE":
+                kotu += 0.5
+                tek += x.islower()
+        elif _oc_iyi(x):
+            iyi += 1
+            iyi3 += len(x) >= 3
+        elif x.isalpha() and not (set(x) & set(_OC_UNLU)):
+            kotu += 1   # ünlüsüz harf dizisi: jj, Jp
+            guclu += 1
+    n = len(parcalar)
+    if tek >= 4:
+        guclu += 1    # küçük tek harf yığını: î 11 1 ı S u 1 i
+    if guclu == 0 or kotu < 1.5 or (iyi3 >= 2 and iyi3 >= 0.25 * n):
+        return False
+    return (kotu >= 0.4 * n and iyi < 0.5 * n) or (iyi <= 1 and n >= 4 and kotu >= 2) or (iyi == 0 and n >= 4)
+
+
 def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     """0.5.32: kitabın ham kelime sayıları (harf onarımı ve büyük harfli kelime için) iş parçacığına özel tutulur."""
     _kitap_baglami_kur([o.get("metin", "") for o in ogeler] + list((notlar or {}).values()))
@@ -3325,14 +3402,25 @@ def _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     if not metin_kaynagi and dil == "tr":  # 0.5.31: OCR'ın harf karışmaları, kitabın kendi kelimeleriyle
         hepsi = _kitap_ici_onar(duz + list(notlar.values()))
         duz, notlar = hepsi[:len(duz)], dict(zip(notlar, hepsi[len(duz):]))
+    cop_not = set()
+    if not metin_kaynagi and dil == "tr" and notlar:  # 0.5.33: OCR çöpü dipnot ve atfı silinir
+        for g, t in list(notlar.items()):
+            if _ocr_copu(K.NOT_ISARETI.sub("", t).strip()):
+                cop_not.add(g)
+                R.silindi("çöp dipnot", t)
+                del notlar[g]
     kit = K.yeni(kunye)
     tasinan = []  # atılan paragraftaki sayfa işaretleri sonrakine geçer
     for o, metin in zip(ogeler, duz):
+        if cop_not:
+            metin = K.NOT_ISARETI.sub(lambda m: "" if m.group(1) in cop_not else m.group(0), metin)
         temiz, sayfalar = _konumlar(metin)
         yazi = K.NOT_ISARETI.sub("", temiz).strip()
-        if o["tur"] == "p" and not o.get("koru") and not K.NOT_ISARETI.search(temiz) and (not yazi or (DZ.cop_paragraf_mi(yazi) and not _AR.search(yazi))):
+        ocr_cop = (not metin_kaynagi and dil == "tr" and o["tur"] in ("p", "baslik") and not o.get("koru")
+                   and not o.get("fihrist") and not K.NOT_ISARETI.search(temiz) and _ocr_copu(yazi))  # 0.5.33
+        if (o["tur"] == "p" and not o.get("koru") and not K.NOT_ISARETI.search(temiz) and (not yazi or (DZ.cop_paragraf_mi(yazi) and not _AR.search(yazi)))) or ocr_cop:
             tasinan += [e for e, _ in sayfalar]
-            R.silindi("çöp paragraf", yazi or temiz)
+            R.silindi("çöp başlık" if o["tur"] == "baslik" else "çöp paragraf", yazi or temiz)
             continue
         sayfa = [{"no": e, "konum": {"tr": 0}} for e in tasinan] + [{"no": e, "konum": {"tr": k}} for e, k in sayfalar]
         tasinan = []

@@ -734,6 +734,18 @@ def _turkce_kelime_onar(k):
             adaylar.add((sum(secim), a))
     if not adaylar:
         return k
+    say = _kitap_sayisi()  # 0.5.32: kitabın gövdesinde (küçük harfle) en çok geçen yazım kazanır (CİN, ÇİN değil)
+    if say:
+        kucuk = [DZ._kucuk(a) for _, a in adaylar]
+        puan = sorted(((say.get(kk, 0), a) for kk, (_, a) in zip(kucuk, adaylar)), reverse=True)
+        if puan[0][0] > 0 and (len(puan) == 1 or puan[0][0] > puan[1][0]):
+            return puan[0][1]
+        if puan[0][0] == 0 and len(kucuk) > 1:  # çekimli hâli kitapta yok: kelime ailesi (CİNDEN için "cin…")
+            fark = [i for i in range(len(kucuk[0])) if len({kk[i] for kk in kucuk}) > 1]
+            n = max(fark[-1] + 1 if fark else 0, 3)
+            puan = sorted(((_aile(say, kk[:n]), a) for kk, (_, a) in zip(kucuk, adaylar)), reverse=True)
+            if puan[0][0] > 0 and puan[0][0] >= 2 * puan[1][0]:
+                return puan[0][1]
     en = max(n for n, _ in adaylar)
     enler = [a for n, a in adaylar if n == en]  # Zemberek gevşek: "BESİNCİ" de geçer; en çok harfi düzelten aday
     return enler[0] if len(enler) == 1 else k
@@ -2851,6 +2863,107 @@ def _harf_kaybi_kelime(w):
     return d
 
 
+# 0.5.32: kitabın kendi yazımı esas. Harf onarımı kitabın içinde en az 2 kez aynı geçen yazımı, kitapta hiç geçmeyen bir
+# yazıma çevirmez ("ucüb/ucüp" -> "uçup", "sedden" -> "şedden", "kisimdir" -> "kişimdir" yapılmaz). Kitap o harfi baştan
+# sona kaybetmişse (Âlemlerin Sırrı: ş, ı yok) koruma o harf için kalkar ("sey" -> "şey" sürer). Kelime başındaki I -> İ
+# değişimi korumadan muaftır (Surya İ'yi I okur: "Isa" -> "İsa").
+import threading
+_kitap_yerel = threading.local()
+_KAYIP_CIFT = {"ş": "s", "ç": "c", "ğ": "g", "ö": "o", "ü": "u", "ı": "i", "i": "ı", "s": "ş", "c": "ç", "g": "ğ", "o": "ö", "u": "ü"}
+_OZEL_HARF = {"s": "ş", "c": "ç", "g": "ğ", "o": "ö", "u": "ü", "i": "ı"}
+
+
+def _kitap_baglami_kur(metinler):
+    kel = re.compile(r"[^\W\d_]+")
+    say = collections.Counter(DZ._kucuk(m.group()) for t in metinler for m in kel.finditer(t or ""))
+    harf = collections.Counter()
+    for w, n in say.items():
+        for ch in w:
+            harf[ch] += n
+    kayip = set()
+    for duz, ozel in _OZEL_HARF.items():  # özel harfin oranı normalin çok altındaysa kitap o harfi kaybetmiştir
+        top = harf[duz] + harf[ozel]
+        if top >= 200 and harf[ozel] / top < 0.05:
+            kayip.add(duz)
+    _kitap_yerel.say, _kitap_yerel.kayip = say, kayip
+
+
+def _kitap_baglami_sil():
+    _kitap_yerel.say, _kitap_yerel.kayip = None, set()
+
+
+def _aile(say, onek):
+    """Kitapta bu önekle başlayan kelimelerin toplam sayısı (kelime ailesi)."""
+    return sum(n for w, n in say.items() if w.startswith(onek))
+
+
+def _kitap_sayisi():
+    return getattr(_kitap_yerel, "say", None)
+
+
+def _kitap_yazimi_korunsun(eski, yeni):
+    """eski -> yeni harf onarımı geri alınsın mı (kitapta >= 2 kez geçen yazım, kitapta hiç geçmeyen yazıma dönüyorsa)."""
+    say = _kitap_sayisi()
+    if not say or len(eski) != len(yeni):
+        return False
+    a, b = DZ._kucuk(eski), DZ._kucuk(yeni)
+    if eski[1:] == yeni[1:] and eski[:1] == "I" and yeni[:1] == "İ":
+        return False
+    if say.get(a, 0) < 2 or say.get(b, 0) > 0:
+        return False
+    kayip = getattr(_kitap_yerel, "kayip", set())
+    farklar = [(x, y) for i, (x, y) in enumerate(zip(a, b)) if x != y and not (i == 0 and eski[0] == "I")]
+    if not farklar:
+        return False
+    # kitabın kaybettiği harfe yapılan düzeltme korunmaz
+    return not any(x in kayip or y in kayip or _KAYIP_CIFT.get(y) in kayip for x, y in farklar)
+
+
+def _bas_I_kelime(w):
+    """0.5.32: büyük I ile başlayan küçük harfli kelime ("Iste"): i'li ve ı'lı bütün geçerli hâller denenir; kitapta en çok
+    geçen, sonra en sık kelime seçilir ("İşte"; eskiden DZ "Işte" yapıyordu)."""
+    kk = DZ._kucuk(w)
+    kelimeler, _ = DZ._sozluk()
+    if kk in kelimeler or DZ.gecerli_mi(kk):
+        return w
+    adaylar = set()
+    for bas in ("i" + kk[1:], kk):
+        if bas in kelimeler or DZ.gecerli_mi(bas):
+            adaylar.add(bas)
+        a = DZ._aday(bas)
+        if a:
+            adaylar.add(a)
+    if not adaylar:
+        return w
+    say = _kitap_sayisi() or {}
+    en = min(adaylar, key=lambda a: (-say.get(a, 0), kelimeler.get(a, 10 ** 9)))
+    if en not in kelimeler and len(adaylar) > 1 and not say.get(en):
+        return w
+    return ("İ" if en[0] == "i" else "I" if en[0] == "ı" else en[0].upper()) + en[1:]
+
+
+_BAS_I = re.compile(r"(?<![^\W\d_])I[a-zçğıöşüâîû]+(?![^\W\d_])")
+_HARF_KELIME = re.compile(r"[^\W\d_]+")
+
+
+def _harf_onar_korumali(p):
+    p0 = _izafet_1(p)
+    q = _harf_kaybi_onar(DZ.harfleri_onar(_BAS_I.sub(lambda m: _bas_I_kelime(m.group()), p0)))
+    if not _kitap_sayisi():
+        return q
+    e, y = list(_HARF_KELIME.finditer(p0)), list(_HARF_KELIME.finditer(q))
+    if len(e) != len(y) or any(a.span() != b.span() for a, b in zip(e, y)):
+        return q
+    out, son = [], 0
+    for a, b in zip(e, y):
+        if a.group() != b.group() and _kitap_yazimi_korunsun(a.group(), b.group()):
+            out.append(q[son:b.start()])
+            out.append(a.group())
+            son = b.end()
+    out.append(q[son:])
+    return "".join(out)
+
+
 def _izafet_1(p):
     """OCR'ın 1 okuduğu izafet harfi: "Cenab-1 Hak" -> "Cenab-ı Hak", "Levh-1 Mahfuz" -> "Levh-i Mahfuz"."""
     def f(m):
@@ -2984,8 +3097,7 @@ def _duzelt(metinler, onar=None, yer="metin"):
         p = re.sub(r"\(\s*(\{\{n\d{4,}\}\})\s*\)", r"\1", p)         # ( {{n0002}} ) -> {{n0002}}
         p = re.sub(r"\s*\(\s*\)", "", p)                                  # silinen numaradan kalan "()"
         if onar["harf"]:
-            p = DZ.harfleri_onar(p)
-            p = _harf_kaybi_onar(p)  # 0.5.18
+            p = _harf_onar_korumali(p)  # 0.5.32 (DZ.harfleri_onar + 0.5.18 _harf_kaybi_onar, kitabın yazımı korunur)
         p = re.sub(r"[ \t]{2,}", " ", p).replace(" ,", ",").replace(" .", ".").strip()
         p = re.sub(r"^(\d{1,3}[.)])(?=[^\s\d.)\ue002])", r"\1 ", p)
         R.fark(p0, p, yer)
@@ -3063,7 +3175,8 @@ def _dile_tasi(kit, dil):
 # Roma rakamlarına ve büyük harfli kelimelere dokunulmaz. Yalnız PDF (katman ya da OCR), Türkçe kitap.
 _KARISMA = [("nn", "rı"), ("nn", "rın"), ("nn", "ın"), ("m", "ın"), ("rn", "m"), ("ii", "ü"), ("vc", "ve"), ("hir", "bir"),
             ("hi", "bi"), ("ih", "ib"), ("h", "lı"), ("h", "li"), ("h", "l"), ("h", "b"), ("c", "e"), ("i", "ı"), ("ı", "i"), ("s", "ş"), ("c", "ç"),
-            ("g", "ğ"), ("u", "ü"), ("o", "ö"), ("l", "ı"), ("t", "i")]
+            ("g", "ğ"), ("u", "ü"), ("o", "ö"), ("l", "ı"), ("t", "i"), ("ü", "u"), ("ö", "o")]  # 0.5.32: ü->u, ö->o (südur -> sudur adayı)
+_UNLU_CIFT = {("i", "ı"), ("ı", "i"), ("u", "ü"), ("ü", "u"), ("o", "ö"), ("ö", "o")}
 _IKI_HARFLI = {"vc", "cn", "kı"}
 _korunan = None
 
@@ -3100,10 +3213,20 @@ def _kitap_ici_onar(metinler):
             while i >= 0:
                 c = w[:i] + b + w[i + len(a):]
                 if c != w and sayi.get(c, 0) >= 2 and gecerli(c):
-                    adaylar.add(c)
+                    # 0.5.32: şapkalı (Arapça kökenli) kelimede ünlü değişimi ancak aday kitapta asıl yazımdan sık, bilinen
+                    # Türkçe kelime ya da kelime ailesi büyükse (meâdin -> meâdın yapılmaz; âhıretini -> âhiretini yapılır)
+                    if (a, b) in _UNLU_CIFT and re.search("[âîû]", w) and sayi.get(c, 0) < n and c not in sozluk \
+                            and _aile(sayi, c[:i + 1]) < _aile(sayi, w[:i + 1]):
+                        pass  # kelime ailesi de asıl yazımdan yana (meâdi/meâdin > meâdı/meâdın)
+                    else:
+                        adaylar.add(c)
                 i = w.find(a, i + 1)
         if len(adaylar) == 1:
             esle[w] = adaylar.pop()
+        elif adaylar:  # 0.5.32: kitapta açık ara (en az 3 kat) en sık aday ("hir": bir, hır, lir -> bir)
+            sirali = sorted(adaylar, key=lambda c: -sayi.get(c, 0))
+            if sayi.get(sirali[0], 0) >= 3 * sayi.get(sirali[1], 0):
+                esle[w] = sirali[0]
     if not esle:
         return metinler
 
@@ -3114,7 +3237,7 @@ def _kitap_ici_onar(metinler):
         y = esle.get(_kucuk_tr_kelime(k))
         if not y:
             return k
-        if k[0].isupper():
+        if k[0].isupper() or (k[0] == "t" and y[0] == "i"):  # 0.5.32: baştaki t, OCR'ın okuyamadığı büyük İ (tkinci -> İkinci)
             y = ("İ" if y[0] == "i" else "I" if y[0] == "ı" else y[0].upper()) + y[1:]
         return y
     yeni = [kel_re.sub(degis, t) if t else t for t in metinler]
@@ -3128,6 +3251,15 @@ def _kitap_ici_onar(metinler):
 
 
 def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
+    """0.5.32: kitabın ham kelime sayıları (harf onarımı ve büyük harfli kelime için) iş parçacığına özel tutulur."""
+    _kitap_baglami_kur([o.get("metin", "") for o in ogeler] + list((notlar or {}).values()))
+    try:
+        return _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi, dil)
+    finally:
+        _kitap_baglami_sil()
+
+
+def _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     ogeler = _basliklari_denetle(ogeler)
     _seviyeler(ogeler)
     # 0.5.14: "A — ZAMAN", "B — İRTİKÂ", "C - RIZIK": harfle numaralı ara başlıklar aynı seviyede (yazı boyu tahmini

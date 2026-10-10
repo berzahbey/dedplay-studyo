@@ -141,6 +141,103 @@ def _satir_parcalarini_birlestir(rows):
     return _satir_parcalarini_birlestir(sorted(out, key=lambda r: (r["blok"], r["top"])))
 
 
+# 0.5.34: Tesseract önbelleği. Anahtar: Tesseract sürümü + çağrı türü + dil + ayar + görüntünün kendisi (kip, boyut, baytlar).
+# Aynı görüntü aynı sonucu verdiği için hangi işlevden gelirse gelsin (sayfa OCR'ı, kenar numarası, karışık satır, içindekiler)
+# kayıt kullanılır; kod düzeltmesi Tesseract'a giden görüntüyü değiştirirse anahtar da değişir. Kayıtlar
+# <OCR_ONBELLEK>/tesseract/<ab>/<özet>.json. OCR_ONBELLEK=0 ya da TESS_ONBELLEK=0 kapatır. Testlerdeki taklitler
+# (pytesseract.image_to_data yerine konmuş işlev) önbelleğe girmez ve önbellekten okumaz.
+_tess_surum = None
+
+
+def _tess_surumu():
+    global _tess_surum
+    if _tess_surum is None:
+        try:
+            import pytesseract
+            _tess_surum = str(pytesseract.get_tesseract_version())
+        except Exception:
+            _tess_surum = ""
+    return _tess_surum
+
+
+def _tess_onbellek_yolu(tur, img, lang, config):
+    if os.environ.get("TESS_ONBELLEK", "1").strip().lower() in ("", "0", "kapali", "kapalı"):
+        return None
+    kok = os.environ.get("OCR_ONBELLEK", os.path.join(os.environ.get("DATA_DIR", "/data"), "ocr_onbellek"))
+    if kok.strip().lower() in ("", "0", "kapali", "kapalı"):
+        return None
+    surum = _tess_surumu()
+    if not surum:
+        return None
+    try:
+        h = hashlib.sha1(f"{surum}|{tur}|{lang}|{config}|{img.mode}|{img.size}|".encode("utf-8"))
+        h.update(img.tobytes())
+    except Exception:
+        return None
+    oz = h.hexdigest()
+    return os.path.join(kok, "tesseract", oz[:2], oz + ".json")
+
+
+def _tess_onbellek_oku(yol):
+    if not yol:
+        return None
+    try:
+        import json
+        with open(yol, encoding="utf-8") as f:
+            return json.load(f)["sonuc"]
+    except Exception:
+        return None
+
+
+def _tess_onbellek_yaz(yol, sonuc):
+    if not yol:
+        return
+    try:
+        import json
+        import threading
+        os.makedirs(os.path.dirname(yol), exist_ok=True)
+        gecici = f"{yol}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(gecici, "w", encoding="utf-8") as f:
+            json.dump({"sonuc": sonuc}, f, ensure_ascii=False)
+        os.replace(gecici, yol)
+    except Exception:
+        pass  # önbellek yalnız hız içindir
+
+
+def _tess_data(img, lang=None, config=""):
+    """Tesseract image_to_data (sözlük çıktısı) önbellekli. Hata önbelleğe girmez (yukarı atılır)."""
+    import pytesseract
+    gercek = pytesseract.image_to_data is pytesseract.pytesseract.image_to_data
+    yol = _tess_onbellek_yolu("data", img, lang, config) if gercek else None
+    d = _tess_onbellek_oku(yol)
+    if isinstance(d, dict) and "text" in d:
+        return d
+    k = {"config": config, "output_type": pytesseract.Output.DICT}
+    if lang:
+        k["lang"] = lang
+    d = pytesseract.image_to_data(img, **k)
+    if isinstance(d, dict):
+        _tess_onbellek_yaz(yol, d)
+    return d
+
+
+def _tess_string(img, lang=None, config=""):
+    """pytesseract.image_to_string önbellekli."""
+    import pytesseract
+    gercek = pytesseract.image_to_string is pytesseract.pytesseract.image_to_string
+    yol = _tess_onbellek_yolu("string", img, lang, config) if gercek else None
+    t = _tess_onbellek_oku(yol)
+    if isinstance(t, str):
+        return t
+    k = {"config": config}
+    if lang:
+        k["lang"] = lang
+    t = pytesseract.image_to_string(img, **k)
+    if isinstance(t, str):
+        _tess_onbellek_yaz(yol, t)
+    return t
+
+
 def _ocr_sayfa(args):
     """Taranmış sayfa: (i, satırlar, genişlik, yükseklik). Satır ölçüleri PDF birimine çevrilir."""
     os.environ["OMP_THREAD_LIMIT"] = "1"
@@ -154,9 +251,9 @@ def _ocr_sayfa(args):
     pix = page.get_pixmap(dpi=OCR_DPI)
     img = ImageOps.autocontrast(Image.open(io.BytesIO(pix.tobytes("png"))).convert("L"))
     try:
-        d = pytesseract.image_to_data(img, lang=dil, config=ayar, output_type=pytesseract.Output.DICT)
+        d = _tess_data(img, lang=dil, config=ayar)
     except Exception:
-        d = pytesseract.image_to_data(img, config=ayar, output_type=pytesseract.Output.DICT)
+        d = _tess_data(img, config=ayar)
     if not ayar and dil != "ara":
         _arapca_yeniden_oku(img, d)
     rows = _ocr_satirlari(d, olcek, ayar)
@@ -233,8 +330,7 @@ def _arapca_yeniden_oku(img, d):
                 # en iyi kesit satırdan satıra değişir (harekeler, üst/alt satıra yakınlık): üçü denenir, en güvenlisi
                 kesit = img.crop((max(0, int(kx0)), max(0, int(ky0)), int(kx1), int(ky1)))
                 try:
-                    a = pytesseract.image_to_data(kesit, lang="ara", config="--psm 7",
-                                                  output_type=pytesseract.Output.DICT)
+                    a = _tess_data(kesit, lang="ara", config="--psm 7")
                 except Exception:
                     continue
                 kel = [(t.strip(), float(g)) for t, g in zip(a["text"], a["conf"]) if (t or "").strip()]
@@ -327,7 +423,7 @@ def _kenar_numarasi(img, rows, olcek, dil):
         for y0, y1 in ((0, int(H * 0.10)), (int(H * 0.90), H)):
             serit = img.crop((xa, y0, xb, y1))
             try:
-                d = pytesseract.image_to_data(serit, lang=dil, config="--psm 6", output_type=pytesseract.Output.DICT)
+                d = _tess_data(serit, lang=dil, config="--psm 6")
             except Exception:
                 continue
             for k, t in enumerate(d["text"]):
@@ -810,7 +906,7 @@ def _karisik_satiri_diz(metin, kesit=None):
     if not any(t == "A" for t, _ in parcalar):
         return metin
     try:
-        d = pytesseract.image_to_data(kesit, lang="tur", config="--psm 7", output_type=pytesseract.Output.DICT)
+        d = _tess_data(kesit, lang="tur", config="--psm 7")
     except Exception:
         return metin
     tk = [(d["left"][k], (d["text"][k] or "").strip()) for k in range(len(d["text"])) if (d["text"][k] or "").strip()]
@@ -1558,9 +1654,9 @@ def _ocr_icindekiler(yol, i, dil):
     olcek = 72 / OCR_DPI
     img = ImageOps.autocontrast(Image.open(io.BytesIO(page.get_pixmap(dpi=OCR_DPI).tobytes("png"))).convert("L"))
     try:
-        d = pytesseract.image_to_data(img, lang=dil, config="--psm 11", output_type=pytesseract.Output.DICT)
+        d = _tess_data(img, lang=dil, config="--psm 11")
     except Exception:
-        d = pytesseract.image_to_data(img, config="--psm 11", output_type=pytesseract.Output.DICT)
+        d = _tess_data(img, config="--psm 11")
     kel = []
     for k, t in enumerate(d["text"]):
         t, guven = (t or "").strip(), float(d["conf"][k])
@@ -1569,8 +1665,7 @@ def _ocr_icindekiler(yol, i, dil):
         x, y, w, h = d["left"][k], d["top"][k], d["width"][k], d["height"][k]
         if guven < 92 and _harf(t) >= 2:  # şüpheli kelime (ör. "OÖONSOZ"): tek başına kesilip yeniden okunur
             try:
-                e = pytesseract.image_to_data(img.crop((x - h // 2, y - h // 2, x + w + h // 2, y + h + h // 2)), lang=dil,
-                                              config="--psm 7", output_type=pytesseract.Output.DICT)
+                e = _tess_data(img.crop((x - h // 2, y - h // 2, x + w + h // 2, y + h + h // 2)), lang=dil, config="--psm 7")
                 yeni = [(e["text"][j].strip(), float(e["conf"][j])) for j in range(len(e["text"])) if e["text"][j].strip()]
                 if len(yeni) == 1 and yeni[0][1] > guven:
                     t, guven = yeni[0]
@@ -1602,7 +1697,7 @@ def _ocr_icindekiler(yol, i, dil):
             no = ""
             for kip in ("7", "8", "10"):  # tek satır, tek kelime, tek karakter (Tesseract sürümüne göre biri okur)
                 try:
-                    no = pytesseract.image_to_string(parca, lang=dil, config="--psm " + kip +
+                    no = _tess_string(parca, lang=dil, config="--psm " + kip +
                                                      " -c tessedit_char_whitelist=" + _TOC_NO_KARAKTER).strip()
                 except Exception:
                     no = ""

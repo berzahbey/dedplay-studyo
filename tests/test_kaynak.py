@@ -347,7 +347,7 @@ ok(kaynak._bolum_iskeleti(_og) and [(o["metin"], o["seviye"]) for o in _og if o[
    "Bölüm başlıklarından fihrist; ':' ve '!' ile biten satır başlık değil; bölümsüz kitaba dokunulmaz")
 
 # Sahte başlıklar (paragrafın son satırı, tarama lekesi, "|" kalem çizgisi) paragraf olur; iskelette alt başlık büyük harfli
-_og = [{"tur": "p", "metin": "Bu cümle ayrı-"}, {"tur": "baslik", "metin": "rılmıştır."}, {"tur": "baslik", "metin": "BH"},
+_og = [{"tur": "p", "metin": "Bu cümle ay-"}, {"tur": "baslik", "metin": "rılmıştır."}, {"tur": "baslik", "metin": "BH"},
        {"tur": "baslik", "metin": "runda değilsin. |"}, {"tur": "baslik", "metin": "BİRİNCİ BÖLÜM"},
        {"tur": "p", "metin": "Metin."}, {"tur": "baslik", "metin": "TAKVA ise dinde gâyet itiyatlı olma durumudur."},
        {"tur": "baslik", "metin": "RİYÂ"}, {"tur": "p", "metin": "Metin."}, {"tur": "baslik", "metin": "İKİNCİ BÖLÜM"},
@@ -357,7 +357,7 @@ kaynak._kopuk_paragraflari_birlestir(_og)
 kaynak._bolum_iskeleti(_og)
 ok([(o["metin"], o.get("seviye")) for o in _og if o["tur"] == "baslik"] == [("BİRİNCİ BÖLÜM", 1), ("RİYÂ", 2),
                                                                            ("İKİNCİ BÖLÜM", 1)]
-   and _og[0]["metin"] == "Bu cümle ayrı- rılmıştır.",
+   and _og[0]["metin"] == "Bu cümle ayrılmıştır.",  # 0.5.29: satır sonu tiresi birleşir (eskiden "ay- rılmıştır")
    "Sahte başlıklar paragraf olur ve cümlesine döner; iskelette alt başlık büyük harfli")
 ok(kaynak._ocr_satirlari({"text": ["yüz", "çevirmelisin.", "|"], "block_num": [1] * 3, "par_num": [1] * 3,
                           "line_num": [1] * 3, "left": [10, 60, 220], "width": [40, 120, 6], "top": [10] * 3,
@@ -368,7 +368,7 @@ _og = [{"tur": "p", "metin": "akla hayâle gelmeyen bu ni'met-"}, {"tur": "p", "
        {"tur": "p", "metin": "Şunlar gereklidir:"}, {"tur": "p", "metin": "a) Hor zaman için unutmamak,"},
        {"tur": "p", "metin": "b) İnsanlara iştirak etmemek."}]
 kaynak._kopuk_paragraflari_birlestir(_og)
-ok([o["metin"] for o in _og] == ["akla hayâle gelmeyen bu ni'met- leri, siz iyi kullarına.", "Şunlar gereklidir:",
+ok([o["metin"] for o in _og] == ["akla hayâle gelmeyen bu ni'metleri, siz iyi kullarına.", "Şunlar gereklidir:",  # 0.5.29
                                  "a) Hor zaman için unutmamak,", "b) İnsanlara iştirak etmemek."],
    "Kopuk paragraf birleşir, liste maddeleri ayrı kalır")
 

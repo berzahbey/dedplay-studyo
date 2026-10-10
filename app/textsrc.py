@@ -23,6 +23,9 @@ END_PUNCT = tuple('.!?:;"”»)]…')
 
 def norm(t):
     t = unicodedata.normalize("NFC", t)  # NFKC değil: Türkçe/Arapça harflere dokunma
+    # 0.5.29: satır sonundaki yumuşak tire (U+00AD, ABBYY katmanı: "bü\u00ad" + "tün") gerçek tireye döner; satır birleştirme
+    # onu hecelemeyle birleştirir ("bütün"). Eskiden silinip satırlar boşlukla birleşiyordu ("bü tün"). Satır içindeki silinir.
+    t = re.sub("(?<=[^\\W\\d_])\u00ad(?=[ \t\u00a0]*(?:\n|$))", "-", t)
     t = t.replace("\u00ad", "").replace("\ufeff", "")
     t = re.sub(r"[ \t\u00a0]+", " ", t)
     return t.strip()

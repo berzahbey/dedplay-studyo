@@ -494,6 +494,7 @@ def _surya_satirlari(text_lines, olcek, img=None):
         t = _tekrari_at(_surya_harfleri(TS.norm(t)).strip())
         t = re.sub(r"\s+[(\[]\s*$", "", t)  # 0.5.15: sondaki tek açık parantez kalem işareti
         t = _kalem_isaretleri(t)  # 0.5.16
+        t = _surya_uydurma(t)  # 0.5.29: LaTeX artığı ve uydurma İngilizce
         if len(t.strip()) <= 2 and not _LATIN.search(t) and re.fullmatch(r"[\s\u0660-\u0669\u06f0-\u06f9.\u06d4]+", t):
             continue  # "۰": Arapça rakam/nokta kırıntısı
         if not t:
@@ -524,6 +525,37 @@ def _surya_satirlari(text_lines, olcek, img=None):
         r["surya"] = True  # 0.5.15
     rows.sort(key=lambda r: (r["top"], r["x0"]))
     return _satir_parcalarini_birlestir(rows)
+
+
+# 0.5.29: Surya boş, lekeli ya da Arapça/tablo bölgesinde uydurabiliyor: LaTeX komutları ("\\bigtriangleup \\|", "\\overline")
+# ve İngilizce kalıplar ("the control of the contract of", "THE REŞİDENCE OF A REAL PLATFORM"). Türkçe kitapta İngilizce
+# işlev kelimeleriyle dolu (the/of/and…) ASCII kelime dizisi atılır; satırın geri kalanı (Türkçe, Arapça) kalır.
+_LATEX = re.compile(r"\\[A-Za-z]+\*?|\\[|{}()\[\],;!]|\$+")
+_EN_ISLEV = {"the", "of", "and", "a", "an", "to", "in", "on", "for", "with", "by", "is", "are", "or", "at", "from", "as", "that"}
+
+
+def _surya_uydurma(t):
+    if "\\" in t or "$" in t:
+        t = re.sub(r"\s{2,}", " ", _LATEX.sub(" ", t)).strip()
+    kel = t.split()
+    if len(kel) < 3:
+        return t
+    sade = [re.sub(r"[^\w]", "", k).lower() for k in kel]
+    sil, i = set(), 0
+    while i < len(kel):
+        j = i
+        while j < len(kel) and sade[j] and sade[j].isascii() and sade[j].isalpha():
+            j += 1
+        if j - i >= 3:
+            islev = sum(1 for s in sade[i:j] if s in _EN_ISLEV)
+            ikili = list(zip(sade[i:j], sade[i + 1:j]))
+            tekrar = len(ikili) > len(set(ikili))      # uydurma kendini tekrarlar ("the control of the control of");
+            if tekrar and islev >= 2 and islev / (j - i) >= 0.3 and ({"the", "of"} & set(sade[i:j])):  # gerçek alıntı değil
+                sil.update(range(i, j))
+        i = j + 1 if j == i else j
+    if sil:
+        t = " ".join(k for n, k in enumerate(kel) if n not in sil)
+    return t
 
 
 _AR = re.compile(r"[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]")
@@ -1227,8 +1259,15 @@ def _kenar_numarasi_dizisi(sayfa_satirlari):
     """OCR katmanı kenar numarasını (aslın sayfa numarası gibi) satırın başına/sonuna yazmışsa ayıklar: "millet- (17)",
     "(18) edilebilen". Güvenlik: satır sınırındaki numaralar kitap boyunca düzenli artan bir dizi oluşturmalı."""
     bulunan = []
+    # 0.5.29: gövdeden küçük puntolu satır (dipnot: "(1) Necm sûresi/39") kenar numarası değildir; kitap boyunca artan
+    # dipnot numaraları da "dizi" oluşturduğu için siliniyor, dipnotlar numarasız kalıp kayboluyordu (Ey Oğul)
+    boylar = sorted(r["h"] for rows in sayfa_satirlari for r in rows if r.get("h") and r["n"] >= 4)
+    ana_boy = boylar[len(boylar) // 2] if boylar else 0
+    kucuk = lambda r: ana_boy and r.get("h") and r["h"] < ana_boy * 0.9
     for rows in sayfa_satirlari:
         for r in rows:
+            if kucuk(r):
+                continue
             m = _KENAR_TEK.search(r["text"]) or _KENAR_BAS.search(r["text"]) or _KENAR_SON.search(r["text"])
             if m:
                 bulunan.append(int(m.group(1)))
@@ -1239,6 +1278,8 @@ def _kenar_numarasi_dizisi(sayfa_satirlari):
         return sayfa_satirlari  # düzenli dizi değil: metnin kendi numaraları olabilir, dokunulmaz
     for rows in sayfa_satirlari:
         for r in rows:
+            if kucuk(r):
+                continue
             yeni = "" if _KENAR_TEK.search(r["text"]) else _KENAR_SON.sub("", _KENAR_BAS.sub("", r["text"]))
             if yeni != r["text"]:
                 r["text"] = yeni
@@ -2052,7 +2093,8 @@ def pdf_oku(yol, ilerleme=None):
     son_seviye, toc_girdi = 1, locals().get("toc_girdi", 0)
     for j, i in enumerate(kalan):
         g, dip, paras = parcalar[j]
-        dip_paras = [TS.join_lines(r["text"]) for r in dip]
+        # 0.5.29: dipnot bölgesindeki çıplak sayfa numarası ("17", çift sayfada "6 2") nota eklenmez
+        dip_paras = [TS.join_lines(r["text"]) for r in dip if not re.fullmatch(r"[\d\s]{1,7}", r["text"].strip())]
         # sayfanın dipnotları: numaralı olanlar yeni, numarasız baştaki parça önceki sayfanın notunun devamı
         sayfa_notu = {}
         for no, metin in _notlari_bol(dip_paras):
@@ -2211,6 +2253,18 @@ def _sahte_basliklari_ayikla(ogeler):
             ogeler[k] = dict(o, tur="p")
 
 
+def _kopuk_ekle(sol, sag):
+    """Kopuk paragrafı öncekine ekler. Önceki satır sonu tiresiyle bitiyorsa (heceleme: "gay-" + "ya kuyusu") kelime
+    birleşir, araya boşluk girmez (0.5.29; eskiden "gay- ya" kalıyordu). Sayfa geçişindeki birleştirmeyle aynı karar."""
+    sol, sag = sol.rstrip(), sag.lstrip()
+    kel_sol = re.search(r"([^\W\d_]+)[-‐]$", sol)
+    kel_sag = re.match(r"([a-zçğıöşüâîû][^\W\d_]*)", sag)
+    if kel_sol and kel_sag:
+        birlesik = DZ._birlesik(kel_sol.group(1), kel_sag.group(1)) or (kel_sol.group(1) + kel_sag.group(1))
+        return sol[:kel_sol.start()] + birlesik + sag[kel_sag.end():]
+    return sol + " " + sag
+
+
 def _kopuk_paragraflari_birlestir(ogeler):
     """Cümlesi yarıda kalan paragrafın devamı ayrı paragraf olmuş (kalın ayet meali satır satır, sayfa geçişi, araya
     giren dipnot): önceki paragraf cümle sonu işaretiyle bitmiyorsa ve sonraki küçük harfle başlıyorsa birleşir
@@ -2225,11 +2279,11 @@ def _kopuk_paragraflari_birlestir(ogeler):
             if once and _LATIN.search(once) and not re.match(r"[a-zçğıöşü\d][)\].]\s", sonra) and (
                     (not once.endswith(END_PUNCT) and _AR.search(once[-30:])) or
                     (once.endswith((")", "﴾")) and _AR.search(once[-80:]) and (sonra.startswith("«") or sonra[:1].islower()))):
-                yeni[-1] = dict(p, metin=p["metin"].rstrip() + " " + o["metin"].lstrip())
+                yeni[-1] = dict(p, metin=_kopuk_ekle(p["metin"], o["metin"]))
                 continue
             if once and not once.endswith(END_PUNCT) and re.match(r"[a-zçğıöşüâîû]", sonra) and \
                     not re.match(r"[a-zçğıöşü][)\].]\s", sonra) and not re.match(r"^\(?[a-zçğıöşü\d][)\].]\s", once):
-                yeni[-1] = dict(p, metin=p["metin"].rstrip() + " " + o["metin"].lstrip())
+                yeni[-1] = dict(p, metin=_kopuk_ekle(p["metin"], o["metin"]))
                 continue
         yeni.append(o)
     ogeler[:] = yeni
@@ -3256,6 +3310,10 @@ def _kunye_sec(bilgi, ad_baslik, ad_yazar, dosya_koku):
     if meta_b and len(ad_kel) >= 2 and not ad_kel & {k for k in sade(meta_b).split() if len(k) >= 3}:
         meta_b = ""
     meta_y = bilgi.get("yazar") if _anlamli(bilgi.get("yazar")) and _kisi_adi_mi(bilgi.get("yazar")) else ""
+    # 0.5.29: dosya adında yazar varsa, onunla hiç kelime paylaşmayan bilgi alanı yazarı kullanılmaz: çoğu zaman
+    # kitabı tarayan/yükleyenin adıdır ("Imam_Gazali_-_Felsefenin_Temel_İlkeleri.pdf" + Author "KUTLUG", "Emin")
+    if meta_y and ad_yazar and not set(sade(meta_y).split()) & set(sade(ad_yazar).split()):
+        meta_y = ""
     satirlar = bilgi.get("kapak_satirlari") or ([(bilgi["kapak_baslik"], 1, 0)] if bilgi.get("kapak_baslik") else [])
     if not ad_baslik.isascii():  # dosya adında Türkçe harfler var: kullanıcının verdiği düzgün ad, en güvenilir kaynak
         ek = r"(nin|nın|nun|nün|in|ın|un|ün|a|e|ya|ye|da|de|ta|te|dan|den|tan|ten|la|le|yla|yle|ı|i|u|ü|yı|yi|yu|yü)"
@@ -3264,7 +3322,10 @@ def _kunye_sec(bilgi, ad_baslik, ad_yazar, dosya_koku):
             yazar = turkcelestir(ad_yazar)  # dosya adındaki yazar daha eksiksiz (ör. iki yazarlı kitap)
         else:
             yazar = meta_y if meta_y and not kopya(meta_y) else turkcelestir(ad_yazar)
-        return _ek_birlestir(duzgun(ad_baslik)), duzgun(yazar)
+        yazar = duzgun(yazar)
+        if yazar[:1].islower():  # 0.5.29: "imam_Gazali_-_…" -> "İmam Gazali"
+            yazar = ("İ" if yazar[0] == "i" else "I" if yazar[0] == "ı" else yazar[0].upper()) + yazar[1:]
+        return _ek_birlestir(duzgun(ad_baslik)), yazar
     kapak = _kapak_sec(satirlar, ad_baslik if ad_yazar else "")  # dosya adı "Yazar - Eser" değilse karşılaştırılamaz
     if kapak and ad_yazar:
         baslik = _ada_gore_birlestir(ad_baslik, kapak)  # sıra dosya adından, Türkçe harfler kapaktan

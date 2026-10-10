@@ -33,6 +33,7 @@ def norm(t):
 
 def join_lines(raw):
     raw = re.sub(r"(\w)[-‐]\n(\w)", r"\1\2", raw)
+    raw = re.sub(r"(?<=[^\W\d_])[-‐]\n(?=['’])", "", raw)  # 0.5.30: "Allah-" + "'ın" -> "Allah'ın"
     return norm(raw.replace("\n", " "))
 
 

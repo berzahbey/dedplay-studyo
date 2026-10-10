@@ -333,8 +333,12 @@ def kuru_deneme(kidler=None, cikti=None):
                 continue
             bas = time.time()
             yeni = kaynak.cevir(kaynak_yol, None, {"yol": kaynak_yol})
-            rapor = al() or {}
+            # 0.5.30: "python -m kutuphane.rapor" bu dosyayı __main__ olarak da yükler; kaynak.py raporu
+            # kutuphane.rapor'a yazar: oradan alınır (eskiden boş kalıyor, fark.txt yazılamıyordu)
+            from kutuphane import rapor as _R
+            rapor = _R.al() or {}
             hedef = os.path.join(cikti, kid)
+            os.makedirs(hedef, exist_ok=True)
             kaydet(hedef, rapor)
             dil = (yeni.get("kunye") or {}).get("asil_dil", "tr")
             tm = lambda kit: "\n".join(_temiz((b.get("metin") or {}).get(dil) or (b.get("metin") or {}).get("tr") or "")

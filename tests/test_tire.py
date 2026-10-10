@@ -36,6 +36,14 @@ og = [{"tur": "p", "metin": "kendi nefsiyle kaim olan diye yo-"}, {"tur": "p", "
 S._kopuk_paragraflari_birlestir(og)
 dene("kopuk paragraf birleştirmesi (yo- rumlamaları)", len(og) == 1 and "diye yorumlamaları gibi" in og[0]["metin"])
 
+# 0.5.30
+dene("kopuk: tireden sonra dipnot işareti", S._kopuk_ekle("kalb ile tas-{{n0005}}", "dik ve uzuvlarla") == "kalb ile tasdik{{n0005}} ve uzuvlarla")
+dene("kopuk: tireden sonra kesme işareti", S._kopuk_ekle("ancak Allah-", "'a mahsustur") == "ancak Allah'a mahsustur")
+dene("kopuk: kesme + dipnot", S._kopuk_ekle("Allah-{{n0002}}", "'ın rahmeti") == "Allah'ın{{n0002}} rahmeti")
+dene("satır: yumuşak tireden sonra kesme işareti", TS.join_lines(TS.norm("suçla da Allah\u00ad") + "\n" + TS.norm("'ın merhameti"))
+     == "suçla da Allah'ın merhameti")
+dene("uydurma: rakamlı ve art arda tekrarlı", S._surya_uydurma("the control of the 1000 - 1000 Animal Animal Animal Animal") == "")
+
 # 3) künye
 for yol, meta, yazar in [("/x/Imam_Gazali_-_Felsefenin_Temel_İlkeleri.pdf", "KUTLUG", "İmam Gazali"),
                          ("/x/imam_Gazali_-_Esmaul_hüsna.pdf", "Emin", "İmam Gazali"),

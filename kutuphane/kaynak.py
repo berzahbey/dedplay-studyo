@@ -544,14 +544,18 @@ def _surya_uydurma(t):
     sil, i = set(), 0
     while i < len(kel):
         j = i
-        while j < len(kel) and sade[j] and sade[j].isascii() and sade[j].isalpha():
-            j += 1
-        if j - i >= 3:
-            islev = sum(1 for s in sade[i:j] if s in _EN_ISLEV)
-            ikili = list(zip(sade[i:j], sade[i + 1:j]))
+        while j < len(kel) and kel[j].isascii() and (sade[j].isalpha() or re.fullmatch(r"[\d\W]+", kel[j])):
+            j += 1                                      # 0.5.30: "1000", "-" dizinin içinde kalır
+        harfli = [s for s in sade[i:j] if s.isalpha()]
+        if len(harfli) >= 3:
+            islev = sum(1 for s in harfli if s in _EN_ISLEV)
+            ikili = list(zip(harfli, harfli[1:]))
             tekrar = len(ikili) > len(set(ikili))      # uydurma kendini tekrarlar ("the control of the control of");
-            if tekrar and islev >= 2 and islev / (j - i) >= 0.3 and ({"the", "of"} & set(sade[i:j])):  # gerçek alıntı değil
-                sil.update(range(i, j))
+            ucluk = any(harfli[k] == harfli[k + 1] == harfli[k + 2] for k in range(len(harfli) - 2))  # "Animal Animal Animal"
+            if (tekrar and islev >= 2 and islev / len(harfli) >= 0.3 and ({"the", "of"} & set(harfli))) or \
+                    (ucluk and ({"the", "of"} & set(harfli))):  # gerçek alıntı değil
+                hk = [k for k in range(i, j) if sade[k].isalpha()]
+                sil.update(range(hk[0], hk[-1] + 1))  # baştaki/sondaki rakam ("âyet: 1-2") kalır
         i = j + 1 if j == i else j
     if sil:
         t = " ".join(k for n, k in enumerate(kel) if n not in sil)
@@ -2257,11 +2261,18 @@ def _kopuk_ekle(sol, sag):
     """Kopuk paragrafı öncekine ekler. Önceki satır sonu tiresiyle bitiyorsa (heceleme: "gay-" + "ya kuyusu") kelime
     birleşir, araya boşluk girmez (0.5.29; eskiden "gay- ya" kalıyordu). Sayfa geçişindeki birleştirmeyle aynı karar."""
     sol, sag = sol.rstrip(), sag.lstrip()
-    kel_sol = re.search(r"([^\W\d_]+)[-‐]$", sol)
+    # 0.5.30: tireden sonra sayfanın sahipsiz dipnotu eklenmiş olabilir ("tas-{{n0005}}" + "dik"): işaret kelimeden sonraya
+    isaret = re.search(r"((?:\{\{n\d+\}\}|[\ue000-\ue003][^\ue000-\ue003]*[\ue000-\ue003])+)$", sol)
+    kuyruk = isaret.group(1) if isaret else ""
+    govde = sol[:isaret.start()] if isaret else sol
+    kel_sol = re.search(r"([^\W\d_]+)[-‐]$", govde)
     kel_sag = re.match(r"([a-zçğıöşüâîû][^\W\d_]*)", sag)
     if kel_sol and kel_sag:
         birlesik = DZ._birlesik(kel_sol.group(1), kel_sag.group(1)) or (kel_sol.group(1) + kel_sag.group(1))
-        return sol[:kel_sol.start()] + birlesik + sag[kel_sag.end():]
+        return govde[:kel_sol.start()] + birlesik + kuyruk + sag[kel_sag.end():]
+    if kel_sol and sag[:1] in "'’":  # "Allah-" + "'ın"
+        ek = re.match(r"['’][^\W\d_]*", sag)
+        return govde[:-1] + ek.group(0) + kuyruk + sag[ek.end():]
     return sol + " " + sag
 
 

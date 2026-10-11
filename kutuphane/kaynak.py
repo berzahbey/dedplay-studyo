@@ -1810,6 +1810,91 @@ def _ocr_icindekiler(yol, i, dil):
     return rows, page.rect.width, page.rect.height
 
 
+# 0.5.37: taranmış içindekilerin Tesseract okumasında (--psm 11) nokta dizisi çöpe döner ("Kızmamaktır. e * w e 4 e m a",
+# "Tevbe Etmektir. TA") ve son kelime kaybolabilir ("Namazla e â e e e", "Oruçla A"; "Şükretmektir" yerine "RİNE").
+# Sayfanın asıl okuması (Surya) aynı satırı temiz verir ama sayfa numaralarının çoğunu okumaz. Tesseract satırı ve
+# numarası esas kalır; aynı yükseklikteki eski satırla kelime kelime karşılaştırılır.
+_TOC_NO_AYIR = re.compile(r"^(?P<t>.*?)(?P<n>\s*…\s*\S+\s*)?$")
+
+
+def _toc_kelime_iyi(w):
+    w = w.strip(".,:;!?'\"“”«»()")
+    if len(w) < 2 or not re.search(r"[^\W\d_]", w) or re.search(r"\d", w):
+        return False
+    adaylar = {w, w.replace("I", "İ"), w[:1].replace("I", "İ") + w[1:]}
+    return any(DZ.gecerli_mi(DZ._kucuk(a)) or (len(a) >= 3 and DZ._kelime_mi(a)) for a in adaylar)
+
+
+def _toc_ayni(a, b):
+    from .katalog import sade
+    import difflib
+    sa, sb = sade(a.strip(".,:;!?'\"“”«»()")).strip(), sade(b.strip(".,:;!?'\"“”«»()")).strip()
+    if not sa or not sb:
+        return False
+    if min(len(a.strip(".,:;!?'\"“”«»()")), len(b.strip(".,:;!?'\"“”«»()"))) <= 2:   # 0.5.37d: 'we' != 've'
+        return DZ._kucuk(a.strip(".,:;!?'\"“”«»()")) == DZ._kucuk(b.strip(".,:;!?'\"“”«»()"))
+    return sa == sb or (min(len(sa), len(sb)) >= 4 and difflib.SequenceMatcher(None, sa, sb).ratio() >= 0.75)
+
+
+def _toc_okumalari_birlestir(yeni, eski):
+    """yeni: içindekiler sayfasının Tesseract satırları, eski: aynı sayfanın önceki okuması (Surya). Satır sonundaki,
+    eskide olmayan ve geçerli kelime olmayan parçalar atılır; Tesseract'ın kaybettiği son kelimeler (başlık noktayla
+    bitmemişse, en çok 3, hepsi geçerli) eskiden eklenir; bütünüyle çöp satır eski karşılığının yazısını alır (eski satır
+    başka satıra gitmediyse) ya da atılır. Eski karşılığı olmayan satıra dokunulmaz."""
+    if not eski:
+        return yeni
+    def ortusme(r, e):
+        o = min(r["bot"], e["bot"]) - max(r["top"], e["top"])
+        return o if o > 0.5 * min(r["bot"] - r["top"], e["bot"] - e["top"]) else 0
+    sahip = {}  # eski satır -> en çok örtüşen yeni satır
+    for n, r in enumerate(yeni):
+        for k, e in enumerate(eski):
+            o = ortusme(r, e)
+            if o and o > sahip.get(k, (None, 0))[1]:
+                sahip[k] = (n, o)
+    kullanilan, out = set(), []
+    for n, r in enumerate(yeni):
+        m = _TOC_NO_AYIR.match(r["text"])
+        bas, no = m.group("t").strip(), m.group("n") or ""
+        adaylar = [(ortusme(r, e), k) for k, e in enumerate(eski)]
+        o, en_iyi = max(adaylar, default=(0, None))
+        if _harf(bas) >= 1 and not no.strip() and not re.search(r"\d", bas) and all(
+                len(x.strip(".,:;!?'\"“”«»()")) <= 2 for x in bas.split()):
+            continue    # yalnız 1-2 harfli parçalar: nokta dizisi kırıntısı ("e w e", "a", "w"; 0.5.37d)
+        if o and _harf(bas) >= 2 and sahip.get(en_iyi, (None,))[0] != n and not no.strip() and not any(
+                len(x.strip(".,:;!?'\"“”«»()")) >= 3 and _toc_kelime_iyi(x) for x in bas.split()):
+            continue    # eski satır başka satırın, bu satırda kelime yok
+        if not o or _harf(bas) < 2 or sahip.get(en_iyi, (None,))[0] != n:
+            out.append(r)   # karşılığı yok, harfsiz satır (sayfa numarası) ya da eski satır başka satırın
+            continue
+        e_bas = _toc_temiz(re.sub(r"\s*\d{1,4}\s*$", "", eski[en_iyi]["text"]))
+        ew = e_bas.split()
+        tw = bas.split()
+        j = len(tw)
+        while j > 0 and not any(_toc_ayni(tw[j - 1], x) for x in ew) and (
+                len(tw[j - 1].strip(".,:;!?'\"“”«»()")) <= 2 or not _toc_kelime_iyi(tw[j - 1])):
+            j -= 1
+        kalan = tw[:j]
+        if not kalan:
+            if en_iyi in kullanilan or not ew or not all(_toc_kelime_iyi(x) for x in ew if len(x) > 2):
+                if not no.strip():
+                    continue   # yalnız çöp: atılır
+                out.append(r)
+                continue
+            yazi = e_bas
+        else:
+            yazi = " ".join(kalan)
+            p = max((n for n, x in enumerate(ew) if _toc_ayni(kalan[-1], x)), default=None)
+            ek = ew[p + 1:] if p is not None else []
+            if ek and len(ek) <= 3 and not kalan[-1].endswith(".") and all(_toc_kelime_iyi(x) for x in ek):
+                yazi += " " + " ".join(x.rstrip(".,:;") for x in ek)
+        kullanilan.add(en_iyi)
+        if yazi != bas:
+            r = dict(r, text=yazi + no)
+        out.append(r)
+    return out
+
+
 def _icindekiler_devami(yol, sayfalar, satirlar, toc_sayfalari, kaynak=None):
     """Taranmış içindekiler sayfası nokta dizilerine dayanıklı okumayla (_ocr_icindekiler) yeniden okunur (satirlar
     yerinde güncellenir). Hemen ardındaki başlıksız sayfa, satırlarının çoğu içindekiler
@@ -1822,7 +1907,7 @@ def _icindekiler_devami(yol, sayfalar, satirlar, toc_sayfalari, kaynak=None):
         asil, yari = kaynak[i] if kaynak else (i, None)
         if sayfalar[i][3] and yari is None:  # çift sayfanın yarısı PDF'te tek başına yok: mevcut okuma
             rows, w, h = _ocr_icindekiler(yol, asil, dil)
-            return _sayfa_no_ve_kenar(rows, h)[1]
+            return _toc_okumalari_birlestir(_sayfa_no_ve_kenar(rows, h)[1], satirlar[i])  # 0.5.37
         return satirlar[i]
     out = []
     for i in toc_sayfalari:
@@ -1841,6 +1926,16 @@ def _icindekiler_devami(yol, sayfalar, satirlar, toc_sayfalari, kaynak=None):
     return sorted(set(out))
 
 
+_TOC_ROMA_KESIN = re.compile(r"M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})", re.I)
+
+
+def _toc_no_mu(t):
+    """0.5.37: tek başına satır sayfa numarası mı: rakam ya da kurala uygun Roma rakamı ("İLİM", "MİM", "CİLD" değil)."""
+    t = re.sub(r"[\s\-–—\[\]()]", "", t)
+    return bool(t) and (bool(re.fullmatch(r"\d{1,4}|[٠-٩]{1,4}", t)) or
+                        (t.isascii() and bool(_TOC_ROMA_KESIN.fullmatch(t))))
+
+
 def icindekiler_girdileri(sayfa_satirlari):
     """Basılı içindekiler sayfalarının satırları -> [{'baslik', 'no', 'x0', 'ara'?}].
     Ortadaki numarasız satırlar bölüm başlığıdır ('Birinci Bölüm' + 'Kavram ve Terim' -> 'Birinci Bölüm: Kavram ve
@@ -1852,7 +1947,7 @@ def icindekiler_girdileri(sayfa_satirlari):
             t = UST.sub(r" \1", r["text"]).strip()  # küçük puntolu numara dipnot işareti sanılmış olabilir
             if not t or len(t) > 250 or _icindekiler_basligi(t) or _TOC_ATLA.match(t):   # gerçek içindekiler satırı bu kadar uzun olmaz
                 continue
-            if TS.PAGE_NUM.match(t):  # tek başına numara (aynı hizaya düşmemiş): hemen üstteki numarasız satırın
+            if TS.PAGE_NUM.match(t) and _toc_no_mu(t):  # tek başına numara (aynı hizaya düşmemiş): hemen üstteki numarasız satırın
                 son = satirlar[-1] if satirlar else None
                 if son and son["no"] is None and not son.get("noktali") and r["top"] - son["bot"] < son["h"]:
                     son["no"] = re.sub(r"\D", "", t) or t.strip().lower()
@@ -1907,11 +2002,16 @@ def icindekiler_girdileri(sayfa_satirlari):
     girdiler = [g for g in girdiler if _harf(g["baslik"]) >= 2]
     # sıradan sapan numara (OCR hatası: "Mantık nedir 9" ardından "Tarihsel bilgi 5"): yok sayılır, yeri komşularından
     arap = [(k, int(g["no"])) for k, g in enumerate(girdiler) if g["no"] and g["no"].isdigit()]
+    son = None   # atılmamış son numara
     for n, (k, no) in enumerate(arap):
         sonraki = arap[n + 1][1] if n + 1 < len(arap) else None
         onceki = arap[n - 1][1] if n > 0 else None
         if sonraki is not None and no > sonraki and (onceki is None or onceki <= sonraki):
             girdiler[k]["no"] = None
+        elif son is not None and no < son and (sonraki is None or sonraki >= son):
+            girdiler[k]["no"] = None   # 0.5.37: nokta dizisi rakam okunmuş ("Beşinci Fazilet … 5" 361 ile 372 arasında)
+        else:
+            son = no
     return girdiler
 
 
@@ -1933,6 +2033,20 @@ def _kelimeler(t):
     return re.findall(r"\w+", _sikistir_bosluklu(t))
 
 
+def _toc_govde_cumlesi(metin, a, b):
+    """0.5.37: paragraf, girdiyle başlamayan, küçük harfli ve cümle sonu işaretiyle biten bir gövde cümlesi mi."""
+    import difflib
+    from .katalog import sade
+    t = re.sub(r"\{\{n\d+\}\}|[\ue000-\ue003]\d*", "", SAYFA_ISARET.sub("", metin)).strip(" \"'”’»)]*")
+    if not t.endswith((".", "!", "?", "…")) and not re.search(r"[^\W\d_]{2}[.!?…]\s+\S", t):
+        return False   # 0.5.37d: satır içinde biten cümle de ("…ilgilidir. Sünnetten")
+    harf = [c for c in t if c.isalpha()]
+    if not harf or sum(c.islower() for c in harf) < 0.5 * len(harf):
+        return False   # büyük harfli başlık satırı ("C BEŞİNCİ FAZİLET: ŞÜKRETMEKTİR.")
+    ilk_a, ilk_b = sade(a[0]).strip(), sade(b[0]).strip()
+    return difflib.SequenceMatcher(None, ilk_a, ilk_b).ratio() < 0.75
+
+
 def _toc_puan(metin, baslik):
     """İçindekiler girdisi ile paragraf: 3 aynı, 2 kelime sınırında önek/içerme ("Kıyas" ≠ "Kıyasın tanımı"),
     1 OCR hatalarına dayanıklı benzerlik, 0 değil."""
@@ -1942,6 +2056,8 @@ def _toc_puan(metin, baslik):
     sa, sb = "".join(a), "".join(b)
     if sa == sb:
         return 3
+    if _toc_govde_cumlesi(metin, a, b):
+        return 0   # 0.5.37: "Bu prensip namazla ilgilidir." gövde cümlesidir, "Namazla İlgilidir" başlığı değil
     if len(sa) <= len(sb) * 1.3 + 12 and (a[:len(b)] == b or b[:len(a)] == a or (len(sb) > 8 and sb in sa)):
         return 2
     return 1 if _bulanik_toc(metin, baslik) else 0
@@ -2376,6 +2492,11 @@ def pdf_oku(yol, ilerleme=None):
                 bulundu = k is not None
                 if k is None:  # sayfada bulunamadı: yer imi kipinde sayfanın başına; içindekilerde son başlığın ardına
                     yer = (max(meta_b) + 1) if (icindekiler_modu and meta_b) else eklenen
+                    if icindekiler_modu:  # 0.5.37: aynı sayfada bulunan sonraki girdinin önüne (paragraf bölünmesin)
+                        sonraki_k = next((kk for j in range(n_im + 1, len(sayfa_imleri)) if atanan.get(j) is not None
+                                          for kk, pp in enumerate(yeni_paras) if pp is atanan[j] and kk not in meta_b), None)
+                        if sonraki_k is not None and sonraki_k >= yer:
+                            yer = sonraki_k
                     yeni_paras.insert(yer, ("b", bas, 0))
                     meta_b = {(kk + 1 if kk >= yer else kk): v for kk, v in meta_b.items()}
                     asil_b = {(kk + 1 if kk >= yer else kk) for kk in asil_b}

@@ -3,6 +3,10 @@ yumuşamayı bozmaz (uruc, Sebe', harc-ı, bahs, korkuncudur, göğüse, saatlı
 eger -> eğer, sey -> şey, Isa -> İsa). Büyük harfli başlık: ILIM -> İLİM (Roma rakamı sanılmaz), INSAN -> İNSAN (İNŞAN değil),
 IRAK / ILIK / IRMAK kalır."""
 import os, sys
+# Türkçe kelime listesi git'te yok, yalnız imajda: kod klasöründen çalışınca imajdakini kullan
+_LISTE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app", "data", "tr_kelime.txt")
+if not os.environ.get("TR_KELIME") and not os.path.exists(_LISTE) and os.path.exists("/app/app/data/tr_kelime.txt"):
+    os.environ["TR_KELIME"] = "/app/app/data/tr_kelime.txt"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 from kutuphane import kaynak as S

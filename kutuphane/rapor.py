@@ -125,7 +125,7 @@ def olustur(kit, k, bilgi, uzanti):
     dil = ku.get("asil_dil", "tr")
     r = {"surum": SURUM, "tarih": int(time.time()),
          "kitap": {"ad": (ku.get("baslik") or {}).get("tr") or (ku.get("baslik") or {}).get(dil, ""),
-                   "yazar": (ku.get("yazar") or {}).get("tr", ""), "kaynak": (ku.get("kaynak") or {}).get("ad", ""),
+                   "yazar": (ku.get("yazar") or {}).get("tr") or (ku.get("yazar") or {}).get(dil, ""), "kaynak": (ku.get("kaynak") or {}).get("ad", ""),
                    "tur": uzanti.lstrip(".") or "metin", "dil": dil},
          "cikarma": {"sayfa": bilgi.get("sayfa"), "ocr_sayfa": bilgi.get("ocr"), "ocr_motoru": bilgi.get("ocr_motoru"),
                      "bozuk_katman": bilgi.get("bozuk_katman"), "onarim": (ku.get("cikarma") or {}).get("onarim")}}

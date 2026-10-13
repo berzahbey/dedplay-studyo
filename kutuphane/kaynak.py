@@ -808,11 +808,40 @@ def _gecerli_kelime(k):
         return True
 
 
+_I_TURKCE_BAS = ("ılık", "ılıman", "ılgın", "ırak", "ırk", "ırmak", "ısıt", "ısın", "ısır", "ıslak", "ıslan", "ıslat", "ısmarla", "ısrar",
+                 "ıssız", "ışı", "ızgara", "ıhlamur", "ıvır", "ıspanak", "ızdırap")
+
+
+def _buyuk_I_tercih(k):
+    """0.5.38: büyük harfli geçerli kelimede I'lar İ olunca da geçerliyse: kitapta (küçük harfle) sık geçen yazım; kitapta yoksa ve
+    ikisi de Türkçe kelime listesinde yoksa Osmanlıca sözlüğündeki ("ILIM" ılım değil İLİM; ILIK, IRAK kalır)."""
+    if not k.isupper() or "I" not in k:
+        return k
+    alt = k.replace("I", "İ")
+    if not _gecerli_kelime(alt):
+        return k
+    a, b = DZ._kucuk(k), DZ._kucuk(alt)
+    kelimeler = DZ._sozluk()[0]
+    if kelimeler.get(a, 10 ** 6) < kelimeler.get(b, 10 ** 6):
+        return k                                       # AYNI: "aynı" listede "ayni"den sık (kitaptaki ı kaybı sayımı yanıltmasın)
+    say = _kitap_sayisi() or {}
+    if say.get(a, 0) or say.get(b, 0):
+        return alt if say.get(b, 0) > say.get(a, 0) else k
+    if a in kelimeler or a == "ısı" or a.startswith(_I_TURKCE_BAS):
+        return k                                       # Türkçe listede olan ya da ı ile başlayan Türkçe kelime kalır (IRAK, ILIK, IRMAK)
+    if kelimeler.get(b, 10 ** 6) < 20000:
+        return alt                                     # İLK, İYİ, İSİM (Zemberek "ılk"ı kısaltma sayıyor)
+    korunan = _korunan_kelimeler()
+    return alt if b in korunan and a not in korunan else k   # ilim علم (Osmanlıca sözlüğünde), ılım değil
+
+
 def _turkce_kelime_onar(k):
     """Geçersiz kelimede düşmüş Türkçe harfleri dener (en çok 6 yer); geçerli adaylardan en çok harfi düzelten tek
     aday varsa onu döndürür ("BESINCI" -> "BEŞİNCİ")."""
-    if len(k) < 3 or _gecerli_kelime(k):
+    if len(k) < 3:
         return k
+    if _gecerli_kelime(k):
+        return _buyuk_I_tercih(k)
     yerler = [i for i, c in enumerate(k) if c in _TR_ESLER][:6]
     if not yerler:
         return k
@@ -842,6 +871,10 @@ def _turkce_kelime_onar(k):
             puan = sorted(((_aile(say, kk[:n]), a) for kk, (_, a) in zip(kucuk, adaylar)), reverse=True)
             if puan[0][0] > 0 and puan[0][0] >= 2 * puan[1][0]:
                 return puan[0][1]
+    kelimeler = DZ._sozluk()[0]
+    bilinen = sorted((kelimeler[DZ._kucuk(a)], a) for _, a in adaylar if DZ._kucuk(a) in kelimeler)
+    if bilinen:
+        return bilinen[0][1]                           # 0.5.38: Türkçe kelime listesindeki aday (İNSAN; İNŞAN değil)
     en = max(n for n, _ in adaylar)
     enler = [a for n, a in adaylar if n == en]  # Zemberek gevşek: "BESİNCİ" de geçer; en çok harfi düzelten aday
     return enler[0] if len(enler) == 1 else k
@@ -3148,8 +3181,11 @@ def _kayip_yonu(a, b):
     return len(a) == len(b) and a != b and all(x == y or _KAYIP.get(x) == y for x, y in zip(a, b))
 
 
+_ROMA_GECERLI = re.compile(r"M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})")
+
+
 def _harf_kaybi_kelime(w):
-    if len(w) < 2 or _AR.search(w) or re.fullmatch(r"[IVXLCDM]+", w):  # 0.5.25: Roma rakamı (III, XXI)
+    if len(w) < 2 or _AR.search(w) or _ROMA_GECERLI.fullmatch(w):  # 0.5.25: Roma rakamı (III, XXI); 0.5.38: ILIM, MILLI değil
         return w
     if w.isupper():
         return _turkce_kelime_onar(w) if len(w) >= 3 else w
@@ -3256,17 +3292,57 @@ _BAS_I = re.compile(r"(?<![^\W\d_])I[a-zçğıöşüâîû]+(?![^\W\d_])")
 _HARF_KELIME = re.compile(r"[^\W\d_]+")
 
 
+# 0.5.38 (13 Ekim, toplu rapor): harf onarımı Arapça/eski imlâ kelimeyi ve ünlüyle başlayan ekten önceki yumuşamayı bozuyordu:
+# uruc -> uruç, Sebe' -> Şebe', harc-ı -> harç-ı, bahs -> bahş, korkuncudur -> korkunçudur, göğüse -> göğüşe, saatlık -> şaatlık.
+# Geri alınır: 1) Osmanlıca sözlüğünde olan kelime, yeni yazım Türkçe kelime listesinde yoksa ve kitapta 2 kez geçmiyorsa;
+# 2) izafet tiresinden önceki sözlük kelimesi (harc-ı); 3) ç'li kök (en az 5 harf: korkunç) + ünlüyle başlayan ek; 4) bilinen Türkçe
+# kök (en az 4 harf) + kısa ek, değişen harf kökün içindeyse. Kitabın baştan sona kaybettiği harfte (Âlemlerin Sırrı: ş) geri alma yok.
+_TUR_E_EKLER = ("a", "e", "ı", "i", "u", "ü", "ya", "ye", "da", "de", "ta", "te", "dan", "den", "tan", "ten", "lık", "lik", "luk",
+                "lük", "lı", "li", "lu", "lü", "la", "le", "dır", "dir", "dur", "dür", "tır", "tir", "tur", "tür")
+_TUR_E_UNLU = "aeıioöuüâîû"
+
+
+def _tur_e_korunsun(eski, yeni, sonrasi=""):
+    a, b = DZ._kucuk(eski), DZ._kucuk(yeni)
+    if len(a) != len(b) or a == b:
+        return False
+    farklar = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+    if all(eski[i] == "I" and yeni[i] == "İ" and (i == 0 or eski.isupper()) for i in farklar):
+        return False                                   # baştaki I -> İ (Isa -> İsa), büyük harfli kelimede I -> İ (TEVHID) her zaman
+    kayip = getattr(_kitap_yerel, "kayip", None) or set()
+    if any(a[i] in kayip for i in farklar):
+        return False
+    kelimeler = DZ._sozluk()[0]
+    say = _kitap_sayisi() or {}
+    korunan = _korunan_kelimeler()
+    if a in korunan:
+        if re.match(r"-[ıiuü](?![^\W\d_])", sonrasi or ""):
+            return True                                # harc-ı, ferc-i: izafetli Arapça kelime
+        if b not in kelimeler and say.get(b, 0) < 2:
+            return True                                # uruc, Sebe', bahs
+    for i in farklar:
+        if a[i] == "c" and b[i] == "ç" and i + 1 < len(b) and b[i + 1] in _TUR_E_UNLU and i + 1 >= 5 \
+                and (b[:i + 1] in kelimeler or DZ.gecerli_mi(b[:i + 1])):
+            return True                                # korkunç + udur: yumuşama doğru (korkuncudur)
+    for ek in _TUR_E_EKLER:
+        kok = a[:-len(ek)]
+        if a.endswith(ek) and len(kok) >= 4 and kok in kelimeler and kelimeler[kok] < 30000 and DZ.gecerli_mi(kok) \
+                and all(i < len(kok) for i in farklar):
+            return True                                # göğüs+e, saat+lık: bilinen kök + ek
+    return False
+
+
 def _harf_onar_korumali(p):
     p0 = _izafet_1(p)
     q = _harf_kaybi_onar(DZ.harfleri_onar(_BAS_I.sub(lambda m: _bas_I_kelime(m.group()), p0)))
-    if not _kitap_sayisi():
-        return q
     e, y = list(_HARF_KELIME.finditer(p0)), list(_HARF_KELIME.finditer(q))
     if len(e) != len(y) or any(a.span() != b.span() for a, b in zip(e, y)):
         return q
+    kitapli = bool(_kitap_sayisi())
     out, son = [], 0
     for a, b in zip(e, y):
-        if a.group() != b.group() and _kitap_yazimi_korunsun(a.group(), b.group()):
+        if a.group() != b.group() and ((kitapli and _kitap_yazimi_korunsun(a.group(), b.group()))
+                                       or _tur_e_korunsun(a.group(), b.group(), p0[a.end():a.end() + 3])):
             out.append(q[son:b.start()])
             out.append(a.group())
             son = b.end()
@@ -4026,11 +4102,11 @@ def turkce_onar(metin):
 
     def onar(m):
         w = m.group(0)
-        if re.fullmatch(r"[IVXLCDM]+", w):  # Roma rakamı (II, IV) kelime değildir
+        if _ROMA_GECERLI.fullmatch(w):  # Roma rakamı (II, IV) kelime değildir (0.5.38: ILIM, DIL değil)
             return w
         dogru = _kelime_onar(_tr_kucuk(w))
         if not dogru:
-            return w
+            return _buyuk_I_tercih(w) if w.isupper() and len(w) >= 3 else w   # 0.5.38: ILIM -> İLİM
         if w.isupper():
             return _tr_buyuk(dogru)
         if w[:1].isupper():

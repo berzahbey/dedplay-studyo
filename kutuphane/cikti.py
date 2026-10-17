@@ -25,6 +25,25 @@ PARCA_HARF = 15000  # Stüdyo'ya giden bir parçanın (bir ses dosyasının) en 
 DIPNOT_OSM = "حواشی"  # "DİPNOTLAR" başlığının Osmanlıcası (havâşî)
 
 
+def epublari_sil(kit, yazilan):
+    """0.5.39: kitap silinirken "dosyalarını da sil": kitabın CIKTI'deki EPUB'ları (durumdaki yollar ve kitabın adıyla
+    her dil klasörü; aynı adlı kitap aynı kitaptır, 0.5.27). Dönen: silinen yollar."""
+    silinen = []
+    if not os.path.isdir(CIKTI):
+        return silinen
+    kok = os.path.realpath(CIKTI).rstrip("/") + "/"
+    adaylar = list(yazilan or [])
+    if kit:
+        ad = dosya_adi(kit)
+        adaylar += [os.path.join(k, ad + ".epub") for k in sorted(set(KLASOR_ADI.values()))]
+    for rel in dict.fromkeys(adaylar):
+        yol = os.path.join(CIKTI, rel)
+        if os.path.isfile(yol) and os.path.realpath(yol).startswith(kok):
+            os.remove(yol)
+            silinen.append(yol)
+    return silinen
+
+
 def dosya_adi(kit):
     ku = kit["kunye"]
     asil = ku.get("asil_dil", "tr")

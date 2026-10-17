@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.38"
+SURUM = "0.5.39"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -318,19 +318,31 @@ def epub_indir(kid: str, dosya: str):
 
 
 @app.delete("/api/kitaplar/{kid}")
-def kitap_sil(kid: str):
+def kitap_sil(kid: str, dosyalar: bool = False):
     d = depo.durum_oku(kid) if depo.KIMLIK.match(kid) else None
     if not d:
         raise HTTPException(404, "Böyle bir kitap yok")
+    silinen = 0
+    if dosyalar:  # 0.5.39: "dosyalarını da sil": EPUB'lar burada, öteki biçimler ve sesler Stüdyo işiyle aşağıda
+        kit = None
+        try:
+            yol = depo.kitap_yolu(kid)
+            kit = K.yukle(yol) if os.path.exists(yol) else None
+        except Exception:
+            pass
+        try:
+            silinen += len(cikti.epublari_sil(kit, d.get("cikti")))
+        except Exception as e:
+            print(f"EPUB'lar silinemedi ({kid}): {type(e).__name__}: {e}", flush=True)
     is_no = (d.get("studyo") or {}).get("is")
-    if is_no:  # 0.5.21: kitabın Stüdyo işi (seslendirme sırası) de silinir; dedplay klasöründeki çıktılar kalır
+    if is_no:  # 0.5.21: kitabın Stüdyo işi (seslendirme sırası) de silinir; dosyalar yalnız istenirse (0.5.39)
         try:
             from app.main import delete_job
-            delete_job(int(is_no))
+            silinen += (delete_job(int(is_no), dosyalar=dosyalar) or {}).get("silinen", 0)
         except Exception as e:
             print(f"Stüdyo işi {is_no} silinemedi: {type(e).__name__}: {e}", flush=True)
     # 0.5.19: sırada bekleyen kitap hemen silinir; işi çalışan kitabın işi durdurulup kitap ardından silinir
-    return {"ok": True, "durum": depo.sil_iste(kid)}
+    return {"ok": True, "durum": depo.sil_iste(kid), "silinen": silinen}
 
 
 @app.post("/api/kitaplar/{kid}/studyo")

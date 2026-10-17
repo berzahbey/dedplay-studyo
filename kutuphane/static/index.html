@@ -162,6 +162,24 @@ async function api(yol, secenek = {}) {
   if (!r.ok) throw new Error(veri.detail || `Sunucu hatası (${r.status})`);
   return veri;
 }
+// 0.5.39: silme onayı; "Dosyalarını da sil" seçilirse kitabın dedplay klasöründeki dosyaları da silinir
+function silOnay(metin) {
+  return new Promise(coz => {
+    const dlg = E("dialog", { style: "max-width:480px;border:1px solid var(--line);border-radius:12px;padding:18px;background:var(--surface);color:var(--ink)" });
+    const kutu = E("input", { type: "checkbox", style: "width:18px;height:18px;cursor:pointer;flex:none;margin-top:3px" });
+    const iptal = E("button", { class: "btn ghost", type: "button" }, "Vazgeç");
+    const tamam = E("button", { class: "btn danger", type: "button" }, "Sil");
+    dlg.append(E("p", { style: "margin-top:0" }, metin),
+      E("label", { style: "display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin:12px 0 16px" }, kutu,
+        E("span", {}, "Dosyalarını da sil: dedplay klasöründeki EPUB, PDF, DOCX, TXT, HTML, MP3, M4B ve ses dosyaları. Geri alınamaz.")),
+      E("div", { style: "display:flex;gap:8px;justify-content:flex-end" }, iptal, tamam));
+    const bitir = s => { dlg.close(); dlg.remove(); coz(s); };
+    iptal.onclick = () => bitir(null);
+    tamam.onclick = () => bitir({ dosyalar: kutu.checked });
+    dlg.addEventListener("cancel", e => { e.preventDefault(); bitir(null); });
+    document.body.append(dlg); dlg.showModal();
+  });
+}
 const binlik = n => Number(n || 0).toLocaleString("tr-TR");
 const kelime = n => n >= 1000 ? `${binlik(Math.round(n / 1000))} bin kelime` : `${binlik(n)} kelime`;
 const ilkAd = s => (s || "").split("::")[0].trim();
@@ -400,9 +418,11 @@ async function ayrinti(kid, li) {
   if (osm) osm.onclick = async () => { osm.disabled = true; await api(`/api/kitaplar/${encodeURIComponent(kid)}/osmanlica`, { method: "POST" }).catch(e => alert(e.message)); kitaplar(); };
   const sil = E("button", { class: "btn danger", type: "button" }, "Kitabı sil");
   sil.onclick = async () => {
-    if (!confirm("Bu kitap, kitap.json dosyası ve bütün EPUB'larıyla birlikte silinecek. Emin misin?")) return;
-    try { const r = await api("/api/kitaplar/" + encodeURIComponent(kid), { method: "DELETE" }); acik = null;
+    const s = await silOnay("Bu kitap Stüdyo'dan silinecek (kitap kaydı, düzeltmeler ve seslendirme sırası). Emin misin?");
+    if (!s) return;
+    try { const r = await api("/api/kitaplar/" + encodeURIComponent(kid) + (s.dosyalar ? "?dosyalar=1" : ""), { method: "DELETE" }); acik = null;
           if (r && r.durum === "durduruluyor") alert("Kitabın işi şu an çalışıyor; iş durdurulup kitap birkaç dakika içinde silinecek.");
+          if (s.dosyalar) alert(`dedplay klasöründen ${r.silinen || 0} dosya/klasör silindi.`);
           kitaplar(); } catch (e) { alert(e.message); }
   };
   const okuBag = d.kunye ? E("a", { class: "btn", href: "/oku/" + encodeURIComponent(kid) }, "Oku ve düzelt") : null;
@@ -457,16 +477,19 @@ async function topluKaynaktan() {
 }
 async function topluSil() {
   const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));
-  if (!secilen.length || !confirm(`${secilen.length} kitap; kitap.json dosyaları, bütün EPUB'ları ve Stüdyo işleriyle birlikte silinecek. Emin misin?`)) return;
+  if (!secilen.length) return;
+  const s = await silOnay(`${secilen.length} kitap Stüdyo'dan silinecek (kitap kayıtları, düzeltmeler ve seslendirme sıraları). Emin misin?`);
+  if (!s) return;
   const d = topluCubuk.querySelector("#topluSil");
   topluCalisiyor = true; d.disabled = true;
-  let hata = 0, bekleyen = 0;
+  let hata = 0, bekleyen = 0, silinen = 0;
   for (let i = 0; i < secilen.length; i++) {
     const k = secilen[i];
     d.textContent = `Siliniyor ${i + 1}/${secilen.length}…`;
     try {
-      const r = await api("/api/kitaplar/" + encodeURIComponent(k.kimlik), { method: "DELETE" });
+      const r = await api("/api/kitaplar/" + encodeURIComponent(k.kimlik) + (s.dosyalar ? "?dosyalar=1" : ""), { method: "DELETE" });
       if (r && r.durum === "durduruluyor") bekleyen++;
+      silinen += (r && r.silinen) || 0;
       if (k.studyo && k.studyo.is) await api(`/api/jobs/${k.studyo.is}`, { method: "DELETE" }).catch(() => {});
       topluSecili.delete(k.kimlik);
       if (acik === k.kimlik) acik = null;
@@ -474,7 +497,8 @@ async function topluSil() {
   }
   topluCalisiyor = false;
   const mesaj = [hata ? `${hata} kitap silinemedi.` : "",
-                 bekleyen ? `${bekleyen} kitabın işi çalışıyordu; durdurulup birkaç dakika içinde silinecek.` : ""].join(" ").trim();
+                 bekleyen ? `${bekleyen} kitabın işi çalışıyordu; durdurulup birkaç dakika içinde silinecek.` : "",
+                 s.dosyalar ? `dedplay klasöründen ${silinen} dosya/klasör silindi.` : ""].join(" ").trim();
   if (mesaj) alert(mesaj);
   kitaplar();
 }

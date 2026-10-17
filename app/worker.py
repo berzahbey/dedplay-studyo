@@ -368,6 +368,51 @@ def bicimleri_simdi_yaz(jid):
     threading.Thread(target=calis, daemon=True, name=f"bicim-{jid}").start()
 
 
+def _guvenli_ad(ad):
+    """Dosya adı olarak güvenli mi (boş, '.', '..' ya da klasör ayıracı değil)."""
+    return bool(ad) and ad.strip() not in ("", ".", "..") and "/" not in ad and "\x00" not in ad
+
+
+def _icinde_mi(yol, kok):
+    return os.path.realpath(yol).startswith(os.path.realpath(kok).rstrip("/") + "/")
+
+
+def ciktilari_sil(j):
+    """0.5.39: kitap silinirken "dosyalarını da sil" seçilirse kitabın /dedplay'deki dosyaları silinir: PDF/DOCX/TXT/HTML
+    (3 dil), MP3/<Ad>/, M4B/<Ad>.m4b ve <Ad> - n.m4b, seslendirmenin çalışma klasörü .seslendirme/<Ad>/. Yalnız bu kitabın
+    adıyla birebir eşleşenler; başka kitaba dokunulmaz. Dönen: silinen yollar."""
+    silinen = []
+    if not j or not os.path.isdir(DEDPLAY_DIR):
+        return silinen
+    name = (j["book_name"] or j["title"] or "").replace("/", "-")
+    if not _guvenli_ad(name):
+        return silinen
+
+    def dosya(yol, kok=DEDPLAY_DIR):
+        if os.path.lexists(yol) and not os.path.isdir(yol) and _icinde_mi(yol, kok):
+            os.remove(yol)
+            silinen.append(yol)
+
+    def klasor(yol, kok=DEDPLAY_DIR):
+        if os.path.isdir(yol) and not os.path.islink(yol) and _icinde_mi(yol, kok):
+            shutil.rmtree(yol, ignore_errors=True)
+            silinen.append(yol)
+
+    for fmt, bk in BICIM_KLASORU.items():
+        for dk in DIL_KLASORU.values():
+            dosya(os.path.join(DEDPLAY_DIR, bk, dk, f"{name}.{fmt}"))
+    klasor(os.path.join(DEDPLAY_DIR, "MP3", name))
+    md = os.path.join(DEDPLAY_DIR, "M4B")
+    if os.path.isdir(md):
+        for f in sorted(os.listdir(md)):
+            if f == name + ".m4b" or re.fullmatch(re.escape(name) + r" - \d+\.m4b", f):
+                dosya(os.path.join(md, f))
+    ses = j["book_name"] or name   # Kitap Okuma'nın klasörü (gönderilen dosyanın adı = book_name)
+    if _guvenli_ad(ses) and os.path.isdir(OUTPUT_DIR):
+        klasor(os.path.join(OUTPUT_DIR, ses), OUTPUT_DIR)
+    return silinen
+
+
 def save_outputs_yeni(j, parts, name):
     """Tur 3: /dedplay altında biçim/dil/kitap adı düzeni:
     PDF/Türkçe/Kitap.pdf, PDF/Osmanlıca/…, PDF/Türkçe-Osmanlıca/… (DOCX, TXT, HTML aynı); MP3/Kitap/Kitap - 001.mp3;

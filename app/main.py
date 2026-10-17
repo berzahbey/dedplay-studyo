@@ -276,12 +276,16 @@ def save_job(job_id: int):
 
 
 @app.delete("/api/jobs/{job_id}")
-def delete_job(job_id: int):
+def delete_job(job_id: int, dosyalar: bool = False):
     j = db.get(job_id)
     if j and ok_filename(j):
         clients.ok_clear(ok_filename(j))  # Kitap Okuma'nın listesinden de kaldır
     db.delete_job(job_id)
-    return {"ok": True}
+    silinen = []
+    if j and dosyalar:  # 0.5.39: istenirse kitabın dedplay klasöründeki dosyaları da (iş silindikten sonra: yeniden yazılmasın)
+        from .worker import ciktilari_sil
+        silinen = ciktilari_sil(j)
+    return {"ok": True, "silinen": len(silinen)}
 
 
 # ---------------- indirmeler ----------------

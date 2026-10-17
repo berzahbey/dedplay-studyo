@@ -1,8 +1,9 @@
 # =============================================================================
 #  DEDPLAY STUDIO — HEPSİ BİR ARADA KURULUM
-#  Tek seferde 4 uygulama kurulur:
-#    Stüdyo (8070, Kütüphane dahil) · Kitap Okuma (8020) · Osmanlıca çevirici (8089) · Ollama (11435)
+#  Tek seferde 3 uygulama kurulur:
+#    Stüdyo (8070, Kütüphane dahil) · Kitap Okuma (8020) · Osmanlıca çevirici (8089)
 #  + işlemci ayarı servisi: ZimaOS'un koyduğu 1 çekirdek sınırını otomatik kaldırır.
+#  Yapay zekâ (Ollama) yok: Osmanlıca çevirici kural ve sözlükle çalışır (9 Ekim 2026'dan beri).
 #  Uygulamalar birbirine sunucunun kendisi üzerinden (portlarla) ulaşır; ZimaOS'un ağ ayarından etkilenmez.
 #  Uygulamaların kendi verileri otomatik olarak /DATA/AppData/dedplay-studyo/ altına gider.
 #
@@ -12,23 +13,24 @@
 
 x-klasorler:
   # ▼▼▼ DEĞİŞTİRİLEBİLİR 1: KİTAP KLASÖRÜ ▼▼▼
-  # Eklenecek kitaplarının durduğu klasör.
-  # Stüdyo ve Kitap Okuma'daki "Sunucudan seç" bölümünde bu klasör görünür.
+  # Eklenecek kitapların durduğu klasör (Stüdyo'nun "Sunucudan seç" bölümü).
   # Uygulamalar bu klasöre hiçbir şey yazmaz, sadece okur.
   kitap: &kitap /media/ZimaOS-HD/Kitap
 
   # ▼▼▼ DEĞİŞTİRİLEBİLİR 2: ÇIKTI KLASÖRÜ ▼▼▼
-  # Biten her kitap için burada kitap adıyla bir klasör açılır ve içine
-  # sesli kitap (M4B) ile bütün Türkçe / Osmanlıca EPUB, PDF, Word dosyaları kaydedilir.
-  # Audiobookshelf kullanıyorsan onun "audiobooks" olarak okuduğu klasörü seç.
-  cikti: &cikti /media/ZimaOS-HD/Media/Music/audio
+  # Bütün çıktılar buraya düzenli yazılır:
+  #   EPUB|PDF|DOCX|TXT|HTML/<Dil>/<Eser - Yazar>.<uzantı>, MP3/<Ad>/, M4B/<Ad>.m4b
+  # İçindeki gizli ".seslendirme" klasörü seslendirmenin çalışma klasörüdür: SİLME
+  # (düzeltmeden sonra yalnız değişen bölümün sesi buna dayanır; MP3/M4B dosyaları oradakilere sabit bağlantıdır).
+  cikti: &cikti /media/ZimaOS-HD/dedplay
+  seslendirme: &seslendirme /media/ZimaOS-HD/dedplay/.seslendirme
 
 # ▼ Bundan sonrasına dokunmana gerek yok ▼
 
 name: dedplay-studyo
 services:
 
-  # ---------------- Stüdyo: tek arayüz, diğerlerini yönetir ----------------
+  # ---------------- Stüdyo: tek arayüz (Kütüphane dahil), diğerlerini yönetir ----------------
   studyo:
     image: berzahbey/dedplay-studyo:latest
     container_name: dedplay-studyo
@@ -40,10 +42,11 @@ services:
     environment:
       OKUMA_URL: http://host.docker.internal:8020
       OSMANLICA_URL: http://host.docker.internal:8089
-      OSM_USE_OLLAMA: "false"      # Osmanlıcada bilinmeyen kelimeler için Ollama (yavaşlatır)
       DATA_DIR: /data              # Kütüphane verileri (kitaplar, OCR önbelleği, Surya modelleri)
       STUDYO_DATA_DIR: /studyo-data
-      CIKTI_DIR: /cikti-kitaplar   # Kütüphane EPUB klasörü
+      CIKTI_DIR: /cikti-kitaplar   # eski Kütüphane EPUB klasörü (geriye uyum)
+      DEDPLAY_DIR: /dedplay        # ana çıktı klasörü (EPUB, PDF, DOCX, TXT, HTML, MP3, M4B)
+      OUTPUT_DIR: /dedplay/.seslendirme   # Kitap Okuma'nın çalışma klasörü (aynı klasör, Stüdyo içinden)
       STUDYO_URL: http://host.docker.internal:8070
       OTOMATIK_CEVIRI: "0"
     volumes:
@@ -65,24 +68,34 @@ services:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/kitap-okuma/text
         target: /okuma-text
+        read_only: true
         bind:
           create_host_path: true
-        read_only: true
       - type: bind
         source: *kitap
         target: /kaynak
         read_only: true
       - type: bind
         source: *cikti
+        target: /dedplay
+        bind:
+          create_host_path: true
+      - type: bind
+        source: *seslendirme
         target: /cikti
+        bind:
+          create_host_path: true
     x-casaos:
       volumes:
         - container: /kaynak
           description:
             en_us: "Kitap klasörü: eklenecek kitapların bulunduğu klasör (sadece okunur)."
+        - container: /dedplay
+          description:
+            en_us: "Çıktı klasörü: EPUB, PDF, Word, TXT, HTML, MP3 ve M4B dosyaları buraya düzenli kaydedilir."
         - container: /cikti
           description:
-            en_us: "Çıktı klasörü: sesli kitaplar ve bütün Türkçe/Osmanlıca dosyalar buraya kaydedilir."
+            en_us: "Seslendirmenin çalışma klasörü (çıktı klasöründeki gizli .seslendirme). Silme."
         - container: /data
           description:
             en_us: "Kütüphane verileri (kitaplar, düzeltmeler, OCR önbelleği). Değiştirme."
@@ -91,29 +104,12 @@ services:
             en_us: "Stüdyo verileri. Değiştirme."
         - container: /cikti-kitaplar
           description:
-            en_us: "Kütüphane'nin EPUB klasörü."
+            en_us: "Eski Kütüphane EPUB klasörü."
         - container: /okuma-text
           description:
             en_us: "Kitap Okuma'nın metin parçaları. Değiştirme."
 
-  # ---------------- Ollama: Osmanlıca çeviricinin modelini (qwen2.5:7b) çalıştırır ----------------
-  ollama:
-    image: ollama/ollama:latest
-    container_name: dedplay-ollama
-    restart: unless-stopped
-    ports:
-      - "11435:11434"
-    environment:
-      OLLAMA_KEEP_ALIVE: 30m
-      OLLAMA_NUM_PARALLEL: "1"
-    volumes:
-      - type: bind
-        source: /DATA/AppData/dedplay-studyo/ollama
-        target: /root/.ollama
-        bind:
-          create_host_path: true
-
-  # ---------------- Kitap Okuma: sesli kitap (Piper) ----------------
+  # ---------------- Kitap Okuma: sesli kitap (Piper; Arapça için FastPitch) ----------------
   kitap-okuma:
     image: berzahbey/dedplay-kitap-okuma:latest
     container_name: dedplay-kitap-okuma
@@ -140,22 +136,18 @@ services:
         source: *kitap
         target: /app/kaynak-kitaplar
       - type: bind
-        source: *cikti
+        source: *seslendirme
         target: /app/audio
+        bind:
+          create_host_path: true
 
-  # ---------------- Osmanlıca çevirici ----------------
+  # ---------------- Osmanlıca çevirici (kural + sözlük, Hayrat ölçüsü; yapay zekâ yok) ----------------
   osmanlica:
     image: berzahbey/osmanlica-cevirici:latest
     container_name: osmanlica-cevirici
-    extra_hosts: ["host.docker.internal:host-gateway"]
     restart: unless-stopped
-    depends_on: [ollama]
     ports:
       - "8089:8000"
-    environment:
-      OLLAMA_HOST: http://host.docker.internal:11435
-      OLLAMA_MODEL: qwen2.5:7b
-      OLLAMA_TIMEOUT: "300"
     volumes:
       # Sözlük (/app/data) bilerek bağlanmadı: güncel sözlük imajın içinden gelir.
       - type: bind
@@ -163,18 +155,6 @@ services:
         target: /data
         bind:
           create_host_path: true
-
-  # ---------------- Osmanlıca çevirici için Ollama modelini bir kez indirir ----------------
-  # (İş bitince durur; ZimaOS'ta "durdu" görünmesi normaldir.)
-  model-indir:
-    image: ollama/ollama:latest
-    container_name: dedplay-model-indir
-    extra_hosts: ["host.docker.internal:host-gateway"]
-    restart: "no"
-    depends_on: [ollama]
-    environment:
-      OLLAMA_HOST: http://host.docker.internal:11435
-    entrypoint: ["/bin/sh", "-c", "sleep 10; ollama pull qwen2.5:7b"]
 
   # ---------------- İşlemci ayarı ----------------
   # ZimaOS "Özel Kurulum"da her uygulamaya kendiliğinden 1 çekirdek sınırı koyabiliyor.
@@ -189,9 +169,9 @@ services:
         source: /var/run/docker.sock
         target: /var/run/docker.sock
     # Betik kodlanmış (base64) olarak duruyor: içinde dolar işareti geçmediği için ZimaOS ve
-    # Docker Compose onu bozamaz. Çözülmüş hâli: dakikada bir diğer uygulamaların işlemci
-    # sınırına bakar, sunucunun çekirdek sayısından azsa (nproc) en yükseğe çıkarır.
-    entrypoint: ["/bin/sh", "-c", "echo Tj0kKG5wcm9jKTsgZWNobyAiU3VudWN1ZGEgJE4gacWfIHBhcsOnYWPEscSfxLEgdmFyIgp3aGlsZSB0cnVlOyBkbwogIGZvciBjIGluIGRlZHBsYXktc3R1ZHlvIGRlZHBsYXktdHJhbnNsYXRlIGRlZHBsYXktb2xsYW1hIGRlZHBsYXkta2l0YXAtb2t1bWEgb3NtYW5saWNhLWNldmlyaWNpOyBkbwogICAgY3VyPSQoZG9ja2VyIGluc3BlY3QgLWYgJ3t7Lkhvc3RDb25maWcuTmFub0NwdXN9fScgJGMgMj4vZGV2L251bGwpIHx8IGNvbnRpbnVlCiAgICBpZiBbICIkY3VyIiAhPSAiMCIgXSAmJiBbICIkY3VyIiAtbHQgIiQoKE4gKiAxMDAwMDAwMDAwKSkiIF07IHRoZW4KICAgICAgZG9ja2VyIHVwZGF0ZSAtLWNwdXMgIiROIiAiJGMiID4vZGV2L251bGwgJiYgZWNobyAiJGM6IGnFn2xlbWNpIHPEsW7EsXLEsSAkTiDDp2VraXJkZcSfZSDDp8Sxa2FyxLFsZMSxIgogICAgZmkKICBkb25lCiAgc2xlZXAgNjAKZG9uZQo= | base64 -d | sh"]
+    # Docker Compose onu bozamaz. Çözülmüş hâli: dakikada bir dedplay-studyo, dedplay-kitap-okuma ve
+    # osmanlica-cevirici'nin işlemci sınırına bakar, sunucunun çekirdek sayısından azsa (nproc) en yükseğe çıkarır.
+    entrypoint: ["/bin/sh", "-c", "echo Tj0kKG5wcm9jKTsgZWNobyAiU3VudWN1ZGEgJE4gacWfIHBhcsOnYWPEscSfxLEgdmFyIgp3aGlsZSB0cnVlOyBkbwogIGZvciBjIGluIGRlZHBsYXktc3R1ZHlvIGRlZHBsYXkta2l0YXAtb2t1bWEgb3NtYW5saWNhLWNldmlyaWNpOyBkbwogICAgY3VyPSQoZG9ja2VyIGluc3BlY3QgLWYgJ3t7Lkhvc3RDb25maWcuTmFub0NwdXN9fScgJGMgMj4vZGV2L251bGwpIHx8IGNvbnRpbnVlCiAgICBpZiBbICIkY3VyIiAhPSAiMCIgXSAmJiBbICIkY3VyIiAtbHQgIiQoKE4gKiAxMDAwMDAwMDAwKSkiIF07IHRoZW4KICAgICAgZG9ja2VyIHVwZGF0ZSAtLWNwdXMgIiROIiAiJGMiID4vZGV2L251bGwgJiYgZWNobyAiJGM6IGnFn2xlbWNpIHPEsW7EsXLEsSAkTiDDp2VraXJkZcSfZSDDp8Sxa2FyxLFsZMSxIgogICAgZmkKICBkb25lCiAgc2xlZXAgNjAKZG9uZQo= | base64 -d | sh"]
 
 x-casaos:
   architectures: [amd64]
@@ -210,4 +190,4 @@ x-casaos:
   description:
     en_us: >-
       Dedplay Studio (Kütüphane dahil), Kitap Okuma ve Osmanlıca çeviriciyi tek arayüzde birleştirir.
-      Türkçe kitap temizlenir, EPUB olur; ardından seslendirilir (M4B) ve Osmanlıcaya aktarılır. Bütün çıktılar seçtiğin klasöre kaydedilir.
+      Türkçe kitap temizlenir, EPUB olur; ardından seslendirilir (M4B) ve Osmanlıcaya aktarılır. Bütün çıktılar seçtiğin klasöre düzenli kaydedilir.

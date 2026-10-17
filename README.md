@@ -14,8 +14,9 @@ Arapça EPUB olarak kalır.
 
 ## Kurulum 1: Hepsi bir arada (önerilen)
 
-`docker-compose.stack.yml` tek seferde dört uygulamayı kurar:
-Stüdyo (8070, Kütüphane dahil), Kitap Okuma (8020), Osmanlıca çevirici (8089) ve Ollama.
+`docker-compose.stack.yml` tek seferde üç uygulamayı kurar:
+Stüdyo (8070, Kütüphane dahil), Kitap Okuma (8020) ve Osmanlıca çevirici (8089).
+Yapay zekâ (Ollama) gerekmez: Osmanlıca çevirici kural ve sözlükle çalışır.
 
 **ZimaOS:** Uygulama Mağazası → Özel Kurulum → İçe aktar → `docker-compose.stack.yml`
 dosyasının içeriğini yapıştır.
@@ -34,7 +35,7 @@ YAML'ın en üstündeki **sadece iki satırı** kendine göre değiştir:
 | Ayar | Ne işe yarar? | Varsayılan |
 |---|---|---|
 | **Kitap klasörü** (`kitap:`) | Eklenecek kitapların durduğu klasör. "Sunucudan seç" bölümünde bu görünür. Uygulamalar buraya yazmaz. | `/media/ZimaOS-HD/Kitap` |
-| **Çıktı klasörü** (`cikti:`) | Biten her kitap için burada bir klasör açılır: sesli kitap + bütün dosyalar. Audiobookshelf kullanıyorsan onun okuduğu klasörü seç. | `/media/ZimaOS-HD/Media/Music/audio` |
+| **Çıktı klasörü** (`cikti:`, `seslendirme:`) | Bütün çıktılar burada düzenli durur: `EPUB/`, `PDF/`, `DOCX/`, `TXT/`, `HTML/` (dil ve eser adına göre), `MP3/`, `M4B/`. İçindeki gizli `.seslendirme` klasörü seslendirmenin çalışma klasörüdür, silinmez. `seslendirme:` satırı her zaman `<cikti>/.seslendirme` olmalı. | `/media/ZimaOS-HD/dedplay` |
 
 Geri kalan her şey (veritabanları, OCR ve ses modelleri) otomatik olarak
 `/DATA/AppData/dedplay-studyo/` altında oluşur. Portlar doluysa `ports:` satırlarındaki

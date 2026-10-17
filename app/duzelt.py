@@ -120,6 +120,17 @@ _TIRE_BOSLUK = re.compile(r"(?<![\w-])([^\W\d_]{2,})[-‐]\s+([a-zçğıöşüâ
 _SATIR_ICI_TIRE = re.compile(r"(?<![\w-])([^\W\d_]{2,})-([a-zçğıöşüâîû]{2,})(?![\w-])")
 
 
+_ACILIS_CIZGI = re.compile(r"(?:^|[\s(])[-–—](?=[^\W\d_])")
+_KAPANIS_CIZGI = re.compile(r"[^\W\d_][-–—](?:\s|$)")
+
+
+def acik_ara_soz(metin, bas):
+    """0.5.40c: bas'tan önceki 250 harfte açılmış, henüz kapanmamış ara söz çizgisi var mı ("-dilsizlik değil- acz", "–tâbir caiz ise- hummalı")?"""
+    once = metin[max(0, bas - 250):bas]
+    acik = [m.end() for m in _ACILIS_CIZGI.finditer(once)]
+    return bool(acik) and not _KAPANIS_CIZGI.search(once[acik[-1]:])
+
+
 def satir_ici_tireleri_birlestir(p):
     """EPUB'da satır içinde kalmış heceleme tiresi: Merini-ler -> Meriniler (sağ parça tek başına kelime değilse).
     İzafet (Kur'an-ı) ve gerçek birleşik yazımlara (Âl-i) dokunulmaz."""
@@ -129,8 +140,15 @@ def satir_ici_tireleri_birlestir(p):
         aday = (sol + sag).lower()
         return aday in kelimeler or aday.translate(_TR_ISKELET) in iskelet
 
+    def tarif(m):  # 0.5.40: Arapça harf-i tarif (el-afve, er-ribâ, el-hâşi'în) birleşmez
+        sol, sag = m.group(1).lower(), m.group(2).lower()
+        once = m.string[m.start(1) - 1] if m.start(1) else " "
+        return bool(re.fullmatch(r"[ea][lsşrtdzn]", sol)) and (once in "([“\"‘'" or sol[-1] == sag[:1])
+
     def degis(m):  # tiresiz: sağ parça kısa ek gibiyse ya da birleşik hâl listedeyse (ilim-irfan kalır)
         sol, sag = m.group(1), m.group(2)
+        if tarif(m):
+            return m.group(0)
         if len(sag) <= 4 and sag.lower() not in _BAGLAC:
             return _birlesik(sol, sag) or (sol + sag)
         if _kelime_mi(sag) or not listede(sol, sag):
@@ -139,8 +157,16 @@ def satir_ici_tireleri_birlestir(p):
 
     def degis_bosluklu(m):  # "kitap- ların": tireden sonra boşluk, bölünme neredeyse kesin
         sol, sag = m.group(1), m.group(2)
+        if tarif(m):
+            return sol + "-" + sag
         if _kelime_mi(sag) and not listede(sol, sag):
             return m.group(0)
+        if not listede(sol, sag) and not _gecerli_kelime(sol + sag) and acik_ara_soz(m.string, m.start(1)) \
+                and (_gecerli_kelime(sag) or _kelime_mi(sag) or sag[:1].isupper()):   # 0.5.40d
+            return m.group(0)   # 0.5.40c: açılmış ara sözün kapanış çizgisi (değil- acz, ise- hummalı)
+        if len(sol) > 3 and len(sag) > 3 and not listede(sol, sag) and not _gecerli_kelime(sol + sag) and _gecerli_kelime(sol) \
+                and _gecerli_kelime(sag):
+            return m.group(0)   # 0.5.40: ara söz çizgisi (müstesna- yüzlerinizi, göre- örfe): iki kelime de geçerli, birleşik hâl değil
         return _birlesik(sol, sag) or m.group(0)
     p = _TIRE_BOSLUK.sub(degis_bosluklu, p)
     return _SATIR_ICI_TIRE.sub(degis, p)

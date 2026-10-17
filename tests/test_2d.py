@@ -61,7 +61,7 @@ ok(y1 == [os.path.join("Türkçe", "Eser - Yazar.epub")], f"EPUB klasörü kendi
 y1b = cikti.ciktiya_yaz(kit, [{"dosya": "a.epub", "diller": ["tr"]}], ep, y1)
 ok(y1b == y1, "aynı kitabın yeniden yazımı aynı adı kullanır")
 y2 = cikti.ciktiya_yaz(kit, [{"dosya": "a.epub", "diller": ["tr"]}], ep)
-ok(y2 == [os.path.join("Türkçe", "Eser - Yazar (2).epub")], f"aynı adlı başka kitap (2) ile yazılır {y2}")
+ok(y2 == [os.path.join("Türkçe", "Eser - Yazar.epub")], f"aynı adlı kitap aynı dosyaya yazılır (0.5.25: \"(2)\" kopyası yok) {y2}")
 
 # dinleme: M4B audio/mp4, satır içi, Range ile parça parça
 from starlette.requests import Request

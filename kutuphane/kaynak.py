@@ -1444,7 +1444,34 @@ def _kenar_numaralari_at(rows):
                                     (r["x0"] >= sag - 2 or r["x1"] <= sol + 2))]
 
 
-def _sayfa_paragraflari(rows, genislik, govde, kalin_oran, bas_ayri=False):
+_ASILI_NO = re.compile(r"^\d{1,3}\s?[.)]")
+
+
+def _asili_girinti(sayfa_satirlari, govde):
+    """0.5.40: numaralı maddeler asılı girintili mi (Bakara meali: "2. Bu, …" sol kenarda, devam satırları numaranın sağında)?
+    Kitap boyunca numaralı satırdan sonraki numarasız satırların en az %70'i aynı yerde, numaranın 0,6-4 gövde sağında ve sol kenardaki
+    satırların en az %70'i numaralıysa (sol kenar, devam satırları) döner; değilse None (sıradan paragraf girintisine dokunulmaz)."""
+    ciftler, sol = collections.Counter(), collections.Counter()
+    for rows in sayfa_satirlari:
+        for a, b in zip(rows, rows[1:]):
+            if _ASILI_NO.match(a["text"]) and not _ASILI_NO.match(b["text"]):
+                ciftler[(round(a["x0"]), round(b["x0"]))] += 1
+    toplam = sum(ciftler.values())
+    if toplam < 5:
+        return None
+    (a, b), n = ciftler.most_common(1)[0]
+    if n < 0.7 * toplam or not (govde * 0.6 < b - a < govde * 4):
+        return None
+    for rows in sayfa_satirlari:
+        for r in rows:
+            if abs(r["x0"] - a) < govde * 0.4:
+                sol[bool(_ASILI_NO.match(r["text"]))] += 1
+    if sol[True] < 0.7 * (sol[True] + sol[False]):
+        return None
+    return (a, b)
+
+
+def _sayfa_paragraflari(rows, genislik, govde, kalin_oran, bas_ayri=False, asili=None):
     """Bir sayfanın ana satırları -> [(tür, metin, boy)] (tür 'b' başlık ya da 'p').
     bas_ayri: art arda başlık satırları birleştirilmez (içindekilerden fihrist: hangisinin ne olduğunu o söyler)."""
     rows = _kenar_numaralari_at(rows)
@@ -1469,7 +1496,16 @@ def _sayfa_paragraflari(rows, genislik, govde, kalin_oran, bas_ayri=False):
                 bosluk = r["top"] - onceki["top"] > aralik * 1.55
                 kisa_son = onceki["text"].endswith(END_PUNCT) and onceki["x1"] < sag - govde * 2.5
                 madde = re.match(r"^\d{1,3}(?:[.)]|\s?[—–-])\s", r["text"])  # "3) ", "4 — " (0.5.13)
+                if asili and not madde and _ASILI_NO.match(r["text"]) and abs(r["x0"] - asili[0]) < govde * 0.4:
+                    madde = True   # 0.5.40: asılı girintili düzende sol kenardaki numara boşluksuz da madde başı ("13.Onlara")
+                if not madde:
+                    _m1, _m0 = _ASILI_NO.match(r["text"]), _ASILI_NO.match(cur[0][1]["text"])
+                    if _m1 and _m0 and int(re.match(r"\d+", r["text"]).group(0)) == int(re.match(r"\d+", cur[0][1]["text"]).group(0)) + 1:
+                        madde = True   # 0.5.40: ardışık numaralı madde, numaradan sonra boşluk yok ("10. Amel…" / "11.Gök…")
                 yeni = girinti or bosluk or kisa_son or bool(madde)
+                if asili and yeni and not bosluk and not _ASILI_NO.match(r["text"]) and abs(r["x0"] - asili[1]) < govde * 0.4 \
+                        and _ASILI_NO.match(cur[0][1]["text"]):
+                    yeni = False   # 0.5.40: asılı girintili numaralı madde (Bakara: "2. Bu, …" / "için bir …"): devam satırı
         if yeni and cur:
             out.append(cur)
             cur = []
@@ -2410,6 +2446,9 @@ def pdf_oku(yol, ilerleme=None):
     govde = govde_k or govde_o or 11
     tum = [r for rows in satirlar_k for r in rows]
     kalin_oran = sum(len(r["text"]) for r in tum if r["kalin"]) / max(1, sum(len(r["text"]) for r in tum))
+    asili = _asili_girinti(satirlar_k, govde)   # 0.5.40: Bakara düzeni (asılı girintili numaralı ayetler)
+    if asili:
+        bilgi["asili_girinti"] = list(asili)
     ogeler, notlar, not_sayac = [], {}, [0]
     son_not = None
     # PDF'in kendi yer imleri varsa başlıklar oradan (bizim başlık tanımamız devre dışı)
@@ -2426,7 +2465,7 @@ def pdf_oku(yol, ilerleme=None):
     for j, i in enumerate(kalan):
         g = (govde_o if sayfalar[i][3] else govde_k) or govde
         ana, dip = _dipnot_ayir(satirlar_k[j], sayfalar[i][2], g)
-        parcalar.append((g, dip, _sayfa_paragraflari(ana, sayfalar[i][1], g, kalin_oran)))
+        parcalar.append((g, dip, _sayfa_paragraflari(ana, sayfalar[i][1], g, kalin_oran, asili=asili)))
     icindekiler_modu = False
     if not yer_imi_modu and toc_sayfalari:  # yer imi yoksa: basılı içindekiler sayfası fihrist kaynağı
         sira = {i: j for j, i in enumerate(kalan)}
@@ -2435,7 +2474,7 @@ def pdf_oku(yol, ilerleme=None):
             g, dip, _ = parcalar[j]
             ana, _ = _dipnot_ayir(satirlar_k[j], sayfalar[i][2], g)
             ana = _kisa_parcalari_birlestir(ana)
-            ayri.append((g, dip, _sayfa_paragraflari(ana, sayfalar[i][1], g, kalin_oran, bas_ayri=True)))
+            ayri.append((g, dip, _sayfa_paragraflari(ana, sayfalar[i][1], g, kalin_oran, bas_ayri=True, asili=asili)))
         toc_imler = icindekiler_fihristi(icindekiler_girdileri([satirlar[i] for i in toc_sayfalari]), nolar, kalan,
                                          lambda i: ayri[sira[i]][2])
         if toc_imler:
@@ -3479,7 +3518,9 @@ def _duzelt(metinler, onar=None, yer="metin"):
             p = DZ.satir_ici_tireleri_birlestir(p)
         if onar["bolunmus"] and hasattr(DZ, "bolunmus_kelimeleri_birlestir"):  # "oldu ğundan" -> "olduğundan"
             p = DZ.bolunmus_kelimeleri_birlestir(p)
-        p = re.sub(r"(?<=[^\W\d_])\s+([’'])\s*(?=[^\W\d_])", r"\1", p)  # Nasır ’ ın -> Nasır’ın
+        p = re.sub(r"(?<=[^\W\d_])\s+([’'])(\s+(?=[^\W\d_])|(?=[a-zçğıöşüâîû]{1,6}(?![^\W\d_])))", r"\1", p)
+        p = re.sub(r"(?<=[A-ZÇĞİÖŞÜÂÎÛ])\s+([’'])(?=[A-ZÇĞİÖŞÜÂÎÛ]{1,6}(?![^\W\d_]))", r"\1", p)   # 0.5.40b: büyük harfli ek (Û ’İN)
+        # Nasır ’ ın -> Nasır’ın; 0.5.40: açılış tırnağı ayrı kalır (Size 'Göklerin, ve 'Hıtta')
         p = re.sub(r"\(\s*(\{\{n\d{4,}\}\})\s*\)", r"\1", p)         # ( {{n0002}} ) -> {{n0002}}
         p = re.sub(r"\s*\(\s*\)", "", p)                                  # silinen numaradan kalan "()"
         if onar["harf"]:

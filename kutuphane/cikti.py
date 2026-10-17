@@ -1,6 +1,6 @@
 """Hazır kitapların dışarıya verilmesi.
 
-1) Çıktı klasörü (CIKTI_DIR, varsayılan /cikti = /media/ZimaOS-HD/Media/Kitaplar): EPUB'lar dile göre klasörlerde
+1) Çıktı klasörü (CIKTI_DIR, varsayılan /dedplay/EPUB = /media/ZimaOS-HD/dedplay/EPUB): EPUB'lar dile göre klasörlerde
    Türkçe/, Osmanlıca/, Türkçe-Osmanlıca/, Arapça/, Arapça-Türkçe/  ->  "Eser adı - Yazar.epub"
 2) Stüdyo'ya gönderme (tur 2/A): bölümlerin Türkçesi ve Kütüphane'nin Osmanlıcası (elle düzeltmeler dahil) satır satır
    eşleşik parçalar olarak, aynı süreçte gider; Stüdyo Osmanlıcayı yeniden çevirmez, seslendirir ve öteki biçimleri üretir.
@@ -15,7 +15,7 @@ import requests
 from . import epub as EPUB
 from . import kitap as K
 
-CIKTI = os.environ.get("CIKTI_DIR", "/cikti")
+CIKTI = os.environ.get("CIKTI_DIR", "/dedplay/EPUB")   # 0.5.40: varsayılan da dedplay (eskiden /cikti = .seslendirme)
 STUDYO_URL = os.environ.get("STUDYO_URL", "http://host.docker.internal:8070").rstrip("/")
 KLASOR_ADI = {("tr",): "Türkçe", ("osm",): "Osmanlıca", ("tr", "osm"): "Türkçe-Osmanlıca", ("ar",): "Arapça",
               ("ar", "tr"): "Arapça-Türkçe", ("en",): "İngilizce", ("en", "tr"): "İngilizce-Türkçe",

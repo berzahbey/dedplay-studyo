@@ -31,7 +31,32 @@ def norm(t):
     return t.strip()
 
 
+_TARIF = re.compile(r"[ea][lsşrtdzn]")
+
+
+def _satir_sonu_tiresi(m):
+    """0.5.40: satır sonu tiresi. Arapça harf-i tarif (el-hâşi'în, es-selvâ, bi'l-ma'rûf) tireyle kalır; iki parça da geçerli kelime ve
+    birleşik hâl değilse tire ara söz çizgisidir, boşlukla kalır (istiyorlardı- bildikleri, müstesna- yüzlerinizi); değilse hece bölünmesi."""
+    sol, sag = m.group(1), m.group(2)
+    once = m.string[m.start(1) - 1] if m.start(1) else " "
+    sl = sol.lower()
+    if (_TARIF.fullmatch(sl) and (once in "([“\"‘'" or sl[-1] == sag[:1].lower() or sag[:1].isupper())) or (sl == "l" and once in "’'"):
+        return sol + "-" + sag
+    try:
+        from app import duzelt as _dz
+        if not _dz._gecerli_kelime(sol + sag) and _dz.acik_ara_soz(m.string, m.start(1)) \
+                and (_dz._gecerli_kelime(sag) or _dz._kelime_mi(sag) or sag[:1].isupper()):   # 0.5.40d: "rinden" ek, kelime değil
+            return sol + "- " + sag      # 0.5.40c: açılmış ara sözün kapanış çizgisi (olmasa da- âlemin)
+        if len(sol) > 3 and len(sag) > 3 and not _dz._gecerli_kelime(sol + sag) and _dz._gecerli_kelime(sol) \
+                and _dz._gecerli_kelime(sag):
+            return sol + "- " + sag
+    except Exception:
+        pass
+    return sol + sag
+
+
 def join_lines(raw):
+    raw = re.sub(r"([^\W\d_]+)[-‐]\n([^\W\d_]+)", _satir_sonu_tiresi, raw)   # 0.5.40 (eskiden koşulsuz birleşirdi)
     raw = re.sub(r"(\w)[-‐]\n(\w)", r"\1\2", raw)
     raw = re.sub(r"(?<=[^\W\d_])[-‐]\n(?=['’])", "", raw)  # 0.5.30: "Allah-" + "'ın" -> "Allah'ın"
     return norm(raw.replace("\n", " "))

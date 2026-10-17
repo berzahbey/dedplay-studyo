@@ -17,11 +17,10 @@ services:
       - /DATA/AppData/dedplay-studyo/kitap-okuma/text:/okuma-text:ro
       - /media/ZimaOS-HD/dedplay:/dedplay
       - /media/ZimaOS-HD/dedplay/.seslendirme:/cikti
-      - /media/ZimaOS-HD/Media/Kitaplar:/cikti-kitaplar
     environment:
       - OKUMA_URL=http://host.docker.internal:8020
       - OSMANLICA_URL=http://host.docker.internal:8089
       - STUDYO_DATA_DIR=/studyo-data
-      - CIKTI_DIR=/cikti-kitaplar
+      - CIKTI_DIR=/dedplay/EPUB
       - STUDYO_URL=http://host.docker.internal:8070
       - OTOMATIK_CEVIRI=0

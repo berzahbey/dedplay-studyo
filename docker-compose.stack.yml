@@ -44,7 +44,7 @@ services:
       OSMANLICA_URL: http://host.docker.internal:8089
       DATA_DIR: /data              # Kütüphane verileri (kitaplar, OCR önbelleği, Surya modelleri)
       STUDYO_DATA_DIR: /studyo-data
-      CIKTI_DIR: /cikti-kitaplar   # eski Kütüphane EPUB klasörü (geriye uyum)
+      CIKTI_DIR: /dedplay/EPUB   # Kutuphane EPUB'lari ana cikti klasorunde
       DEDPLAY_DIR: /dedplay        # ana çıktı klasörü (EPUB, PDF, DOCX, TXT, HTML, MP3, M4B)
       OUTPUT_DIR: /dedplay/.seslendirme   # Kitap Okuma'nın çalışma klasörü (aynı klasör, Stüdyo içinden)
       STUDYO_URL: http://host.docker.internal:8070
@@ -58,11 +58,6 @@ services:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/kutuphane
         target: /data
-        bind:
-          create_host_path: true
-      - type: bind
-        source: /media/ZimaOS-HD/Media/Kitaplar
-        target: /cikti-kitaplar
         bind:
           create_host_path: true
       - type: bind
@@ -102,9 +97,6 @@ services:
         - container: /studyo-data
           description:
             en_us: "Stüdyo verileri. Değiştirme."
-        - container: /cikti-kitaplar
-          description:
-            en_us: "Eski Kütüphane EPUB klasörü."
         - container: /okuma-text
           description:
             en_us: "Kitap Okuma'nın metin parçaları. Değiştirme."

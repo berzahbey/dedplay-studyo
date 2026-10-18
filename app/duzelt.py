@@ -131,18 +131,20 @@ def acik_ara_soz(metin, bas):
     return bool(acik) and not _KAPANIS_CIZGI.search(once[acik[-1]:])
 
 
-def satir_ici_tireleri_birlestir(p):
+def satir_ici_tireleri_birlestir(p, yalniz_bosluklu=False, kati=False):
     """EPUB'da satır içinde kalmış heceleme tiresi: Merini-ler -> Meriniler (sağ parça tek başına kelime değilse).
     İzafet (Kur'an-ı) ve gerçek birleşik yazımlara (Âl-i) dokunulmaz."""
     kelimeler, iskelet = _sozluk()
 
     def listede(sol, sag):
-        aday = (sol + sag).lower()
+        aday = _kucuk(sol + sag)   # 0.5.41: "İs- lâm" (Python lower() İ'yi "i + nokta" yapıyordu)
         return aday in kelimeler or aday.translate(_TR_ISKELET) in iskelet
 
     def tarif(m):  # 0.5.40: Arapça harf-i tarif (el-afve, er-ribâ, el-hâşi'în) birleşmez
         sol, sag = m.group(1).lower(), m.group(2).lower()
         once = m.string[m.start(1) - 1] if m.start(1) else " "
+        if _kucuk(sol + sag).startswith("allah"):
+            return False   # 0.5.41: "Al-lah", "Al-lah'ın": heceleme, tarif değil
         return bool(re.fullmatch(r"[ea][lsşrtdzn]", sol)) and (once in "([“\"‘'" or sol[-1] == sag[:1])
 
     def degis(m):  # tiresiz: sağ parça kısa ek gibiyse ya da birleşik hâl listedeyse (ilim-irfan kalır)
@@ -159,17 +161,48 @@ def satir_ici_tireleri_birlestir(p):
         sol, sag = m.group(1), m.group(2)
         if tarif(m):
             return sol + "-" + sag
-        if _kelime_mi(sag) and not listede(sol, sag):
-            return m.group(0)
+        if kati and not _gecerli_kelime(sol + sag):
+            return m.group(0)   # 0.5.41: metin kaynağında yalnız geçerli birleşim (Risale: "kadar- minhac-ı" ara söz)
+        if _kelime_mi(sag) and not listede(sol, sag) and not (len(sag) <= 4 and _gecerli_kelime(sol + sag)):
+            return m.group(0)   # 0.5.41: sağ parça ek ("kulları- nın", "bildirilmiş- tir") ve birleşik hâl geçerliyse birleşir
         if not listede(sol, sag) and not _gecerli_kelime(sol + sag) and acik_ara_soz(m.string, m.start(1)) \
                 and (_gecerli_kelime(sag) or _kelime_mi(sag) or sag[:1].isupper()):   # 0.5.40d
             return m.group(0)   # 0.5.40c: açılmış ara sözün kapanış çizgisi (değil- acz, ise- hummalı)
         if len(sol) > 3 and len(sag) > 3 and not listede(sol, sag) and not _gecerli_kelime(sol + sag) and _gecerli_kelime(sol) \
                 and _gecerli_kelime(sag):
             return m.group(0)   # 0.5.40: ara söz çizgisi (müstesna- yüzlerinizi, göre- örfe): iki kelime de geçerli, birleşik hâl değil
-        return _birlesik(sol, sag) or m.group(0)
+        if _birlesik(sol, sag):
+            return sol + sag
+        if _gecerli_kelime(sol + sag) and (len(sag) <= 4 or not (_kelime_mi(sol) and _kelime_mi(sag))):
+            return sol + sag    # 0.5.41: birleşik hâl Zemberek'e göre geçerli (bildirilmiş- tir, te- âlâ, İs- lâm, kaide- ler)
+        return m.group(0)
     p = _TIRE_BOSLUK.sub(degis_bosluklu, p)
+    if yalniz_bosluklu:   # 0.5.41: metin kaynağında yalnız "kelime- devam" biçimi (boşluksuz tireli yazımlar korunur)
+        return p
     return _SATIR_ICI_TIRE.sub(degis, p)
+
+
+_IC_TIRE = re.compile(r"(?<![\w'’-])([^\W\d_]+)-([a-zçğıöşüâîû][^\W\d_]*)(?![\w-])")
+_IC_TIRE_IZAFET = re.compile(r"(?:y?[ıiuü]|[üuıie][lnrsştdz]|[ae][lnrsştdz]|yy?[ıiuü])")
+_IC_TIRE_ON = {"el", "be", "bi", "bî", "bil", "fil", "lil", "maal", "ma", "la", "lâ", "bed", "ber", "der", "ez", "ba", "bâ", "pür", "hem", "na", "nâ"}
+
+
+def ic_tireleri_birlestir(p):
+    """0.5.41: metni zaten olan kaynakta (EPUB) kelime içinde kalmış heceleme tiresi ("Mev-lânâ", "ta-mamiyle", "Mu-hammed",
+    "kö-tülükleriyle"; Makâlât ~50 yer). Çok dar: birleşik hâl geçerli kelime, sol parça tek başına kelime değil (2 harften
+    uzunsa), sağ parça izafet/tarif eki değil (mânâ-yı, meyl-üt, Vâcib-ül kalır), ünsüzden sonra ünlüyle başlayan parça
+    hece değil (Müşarün-ileyh, el-ân kalır), Arapça/Farsça ön ekler (bî-aman, be-an, maal-) kalır."""
+    def degis(m):
+        sol, sag = m.group(1), m.group(2)
+        ks, kg = _kucuk(sol), _kucuk(sag)
+        if _IC_TIRE_IZAFET.fullmatch(kg) or len(ks) + len(kg) < 4 or ks in _IC_TIRE_ON:
+            return m.group(0)
+        if ks[-1:] not in "aeıioöuüâîû" and kg[:1] in "aeıioöuüâîû":
+            return m.group(0)
+        if len(ks) > 2 and _gecerli_kelime(sol):
+            return m.group(0)
+        return sol + sag if _gecerli_kelime(sol + sag) else m.group(0)
+    return _IC_TIRE.sub(degis, p)
 
 
 def sayfa_atiflarini_sil(p):

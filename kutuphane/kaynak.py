@@ -2681,6 +2681,10 @@ def _kopuk_paragraflari_birlestir(ogeler):
         if p and o["tur"] == "p" and p["tur"] == "p" and not o.get("koru") and not p.get("koru"):
             once = re.sub(r"\{\{n\d+\}\}|[\ue000-\ue003]", "", SAYFA_ISARET.sub("", p["metin"])).rstrip()
             sonra = SAYFA_ISARET.sub("", o["metin"]).lstrip()
+            if re.search(r"[^\W\d_][-‐]$", once) and re.match(r"\d{1,3}\s+[a-zçğıöşüâîû]", sonra):
+                # 0.5.41: heceleme tiresinden sonra sayfa numarası araya girmiş ("gel-" + "47 miştir"): numara atılır
+                o = dict(o, metin=re.sub(r"^((?:\s*\ue002[^\ue003]{1,20}\ue003)*)\s*\d{1,3}\s+", r"\1", o["metin"], count=1))
+                sonra = SAYFA_ISARET.sub("", o["metin"]).lstrip()
             if once and _LATIN.search(once) and not re.match(r"[a-zçğıöşü\d][)\].]\s", sonra) and (
                     (not once.endswith(END_PUNCT) and _AR.search(once[-30:])) or
                     (once.endswith((")", "﴾")) and _AR.search(once[-80:]) and (sonra.startswith("«") or sonra[:1].islower()))):
@@ -2786,6 +2790,102 @@ def _word_temizle(veri):
 _BLOK = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "dd", "dt", "pre"]
 
 
+# 0.5.41: EPUB dipnot atfı olarak sayılan kısa bağlantı yazıları: 12, [12], (12), *, (*), (**), üst simge rakam
+_EPUB_ATIF = r"[\[\(]?\d{1,3}[\]\)]?|\*{1,3}|\(\*{1,3}\)|[¹²³⁴-⁹⁰]+"
+_NOT_ETIKETI = r"\(\s*(?:\*{1,3}|[Hh][âa]şiye(?:cik)?(?:\s*-\s*\d{1,2})?)\s*\)"
+
+
+def _geri_baglanti(el, ad, atif_yeri):
+    """0.5.41: dipnot hedefi kendisi de bağlantı (Calibre/Word: <a href="metin.html#ref" id="not">[10]</a>): yalnız metindeki
+    atfa geri dönüyorsa dipnottur (Özün Özü, Âsâr-ı Bedîiyye); başka yere giden bağlantı eskisi gibi sayılmaz."""
+    dosya, _, frag = el.get("href", "").partition("#")
+    return bool(frag) and (os.path.basename(dosya) or ad, frag) in atif_yeri
+
+
+def _epub_not_metni(metin):
+    """Dipnot metninin başındaki numara/işaret ("[ 10 ]", "(*):", "(Haşiye-2):") ve sonundaki geri dönüş oku (↵) atılır."""
+    metin = re.sub(r"^[\[\(]?\s*\d{1,3}\s*[\]\)]?[.\s]*", "", metin).strip()
+    metin = re.sub(r"^(?:" + _NOT_ETIKETI + r"|\*{1,3}(?=\s))\s*[:.]?\s*", "", metin).strip()   # 0.5.41
+    return re.sub(r"\s*[↵↩⤴]+\s*$", "", metin).strip()
+
+
+def _cift_isaret_sil(metin):
+    """0.5.41: bağlanmış atıftan hemen sonra kaynağın kendi işareti ("{{n0009}}(*)", "{{n0003}}(Haşiye)"): tek atıf kalır."""
+    return re.sub(r"(\{\{n\d+\}\})\s*" + _NOT_ETIKETI, r"\1", metin)
+
+
+def _baslik_cumlesi(metin):
+    """0.5.41: başlık etiketi (h1-h6) taşıyan ama başlık olmayan satır (Âsâr-ı Bedîiyye: kaynağın kalın yazdığı soru-cevap ve
+    cümleler): "S- …", "C- …", "Sual: …", "VEHİM: …", küçük harfle başlayan, ya da birden çok cümleli/uzun ve başlık
+    biçiminde olmayan (kelimelerinin çoğu büyük harfle başlamıyor) satır. Arapça satır ve kısa başlıklar eskisi gibi."""
+    t = re.sub(r"\{\{n\d+\}\}|" + _NOT_ETIKETI, "", SAYFA_ISARET.sub("", metin)).strip()
+    harf = re.findall(r"[^\W\d_]", t)
+    if not harf or len(_AR.findall(t)) * 2 > len(harf):
+        return False
+    if re.match(r"(?:[SC]\s*[-–:]|S-\(|(?:Sual|SUAL|Elcevab|ELCEVAB|Cevab|CEVAB|VEHİM)\s*:)", t):
+        return True
+    if re.match(r"[a-zçğıöşüâîû]", t):
+        return True
+    kel = re.findall(r"[^\W\d_][^\s]*", t)
+    buyuk = sum(1 for k in kel if k[0].isupper()) / max(1, len(kel))
+    if buyuk >= 0.7 or t.isupper():
+        return False
+    return (len(kel) >= 8 and bool(re.search(r"[.!?;:]\s+\S", t))) or len(kel) > 14
+
+
+def _buyuk_harf_onar(t):
+    """0.5.41: "GiRiŞ" -> "GİRİŞ" (büyük harfli kelimede küçük kalmış i)."""
+    return re.sub(r"[^\W\d_]{3,}", lambda m: m.group().replace("i", "İ")
+                  if sum(c.isupper() for c in m.group()) >= 2 and set(c for c in m.group() if c.islower()) == {"i"} else m.group(), t)
+
+
+_KUCUK_BAG = {"ve", "ile", "ki", "mi", "mı", "mu", "mü", "de", "da", "ya", "veya", "yahut", "ile", "bir", "için", "gibi", "ne"}
+
+
+def _etiketsiz_baslik_mi(once, t, sonra):
+    t = SAYFA_ISARET.sub("", t).strip()
+    kel = t.split()
+    if not 1 <= len(kel) <= 8 or len(t) > 70 or not t[:1].isupper() or K.NOT_ISARETI.search(t):
+        return False
+    if re.search(r"[.,;:…»\"'”’\-–!]$", t) or _AR.search(t):
+        return False
+    tum_buyuk = t.upper() == t and len(_harf_dizi(t)) >= 3
+    if tum_buyuk:
+        return not re.search(r"\d", t)
+    if "," in t:
+        return False
+    say = [k for k in kel if len(_harf_dizi(k)) >= 3 and DZ._kucuk(_harf_dizi(k)) not in _KUCUK_BAG]
+    if not say or sum(1 for k in say if k[:1].isupper()) / len(say) < 0.6:
+        return False
+    once = SAYFA_ISARET.sub("", once or "").strip()
+    return len((sonra or "").split()) >= 12 and (not once or once.endswith(END_PUNCT) or once.upper() == once)
+
+
+def _harf_dizi(t):
+    return re.sub(r"[\W\d_]", "", t)
+
+
+def _etiketsiz_basliklar(ogeler):
+    """0.5.41: başlık etiketi hiç olmayan EPUB'da (her şey <p>) kısa, başlık biçiminde (tamamı büyük harf ya da kelimelerin
+    çoğu büyük harfle başlıyor), noktalamayla bitmeyen, önceki paragraf cümle sonuyla biten ve arkasından uzun paragraf
+    gelen satır başlıktır. En az 3 başlık bulunmazsa hiçbir şey değişmez (düz metin kitabı)."""
+    adaylar = []
+    for k, o in enumerate(ogeler):
+        if o["tur"] != "p" or o.get("koru"):
+            continue
+        once = ogeler[k - 1]["metin"] if k else ""
+        sonra = ogeler[k + 1]["metin"] if k + 1 < len(ogeler) else ""
+        if _etiketsiz_baslik_mi(once, o["metin"], sonra):
+            adaylar.append(k)
+    if len(adaylar) < 3:
+        return
+    for k in adaylar:
+        t = _buyuk_harf_onar(ogeler[k]["metin"])
+        yalin = DZ._kucuk(SAYFA_ISARET.sub("", t)).strip()
+        ana = t.upper() == t and (_BOLUM_ON.match(yalin) or _ANA_BASLIK.match(yalin))
+        ogeler[k] = dict(ogeler[k], tur="baslik", metin=t, boy=6 if ana else 5)
+
+
 def epub_oku(yol, ilerleme=None):
     """EPUB -> (öğeler, dipnotlar, bilgi). h1-h6 başlık; noteref bağlantıları dipnot; pagebreak işaretleri sayfa."""
     _gerekli()
@@ -2806,26 +2906,38 @@ def epub_oku(yol, ilerleme=None):
             if _el.get("id"):
                 _sira.setdefault((_ad, _el["id"]), (_i, _k))
     # 1) dipnot hedefleri: kısa (rakam, [1], *) bağlantıların gösterdiği öğeler
-    hedef = {}
+    hedef, atif_yeri = {}, set()
     for ad, soup in belgeler:
         for a in soup.find_all("a", href=True):
             yazi = re.sub(r"\s+", "", a.get_text(strip=True))  # "( 2 )" -> "(2)"
             tip = (a.get("epub:type") or "") + " " + (a.get("role") or "")
-            if "#" in a["href"] and ("noteref" in tip or re.fullmatch(r"[\[\(]?\d{1,3}[\]\)]?|\*{1,3}|[¹²³⁴-⁹⁰]+", yazi)):
+            if "#" in a["href"] and ("noteref" in tip or re.fullmatch(_EPUB_ATIF, yazi)):
                 dosya, frag = a["href"].split("#", 1)
                 _hk = _sira.get((os.path.basename(dosya) or ad, frag))
                 if _hk is not None and _hk < _sira.get(id(a), (0, 0)):
                     continue  # 0.5.25: geri dönüş bağlantısı (dipnottan metne): hedefi dipnot değil
                 hedef[(os.path.basename(dosya) or ad, frag)] = None
+                # 0.5.41: atfın yeri (bağlantının ve üst öğelerinin kimliği): dipnottaki geri bağlantı buraya döner
+                for _u in [a] + list(a.parents)[:2]:
+                    if getattr(_u, "get", None) and _u.get("id"):
+                        atif_yeri.add((ad, _u["id"]))
     notlar, not_elemanlari, gid_of = {}, set(), {}
     for ad, soup in belgeler:
         for el in soup.find_all(id=True):
-            if (ad, el["id"]) in hedef and not (el.name == "a" and el.has_attr("href")):
+            if (ad, el["id"]) in hedef and not (el.name == "a" and el.has_attr("href") and not _geri_baglanti(el, ad, atif_yeri)):
                 kap = el
                 if el.name in ("a", "span", "sup"):  # hedef bağlantının kendisi: notun paragrafını al
                     kap = el.find_parent(["p", "li", "aside", "div", "dd"]) or el
-                metin = kap.get_text(" ", strip=True)
-                metin = re.sub(r"^[\[\(]?\d{1,3}[\]\)]?[.\s]*", "", metin).strip()
+                    # 0.5.41: Word'ün dipnot kutusu (<div id="ftn2"> içinde birkaç paragraf): kutuda başka not yoksa hepsi
+                    kutu = kap.find_parent("div") if kap.name == "p" else None
+                    if kutu is not None and len(kutu.get_text(" ", strip=True)) < 6000 and \
+                            sum(1 for _a in kutu.find_all(id=True) if (ad, _a["id"]) in hedef) == 1:
+                        kap = kutu
+                if kap.name == "div":   # kutudaki paragraflar boşlukla, paragraf içi Word parçaları boşluksuz birleşir
+                    parca = [b for b in kap.find_all(_BLOK) if not b.find(_BLOK)] or [kap]
+                    metin = _epub_not_metni(" ".join(TS.norm(b.get_text("")) for b in parca if b.get_text(strip=True)))
+                else:
+                    metin = _epub_not_metni(kap.get_text(" ", strip=True))
                 gid = "n%04d" % (len(notlar) + 1)
                 notlar[gid] = metin
                 gid_of[(ad, el["id"])] = gid
@@ -2886,7 +2998,7 @@ def epub_oku(yol, ilerleme=None):
         for el in govde.find_all(_BLOK):
             if el.find(_BLOK) or any(id(p) in not_elemanlari for p in [el] + list(el.parents)):
                 continue
-            metin = metin_cikar(el, ad)
+            metin = _cift_isaret_sil(metin_cikar(el, ad))
             hedef_f = fihrist["bloklar"].get(id(el)) if fihrist else None
             if hedef_f:
                 seviye, baslik, onune = hedef_f
@@ -2895,17 +3007,24 @@ def epub_oku(yol, ilerleme=None):
                     ogeler.append({"tur": "baslik", "metin": baslik, "boy": 0, "seviye": seviye, "fihrist": True})
                 else:     # başlığın kendisi: metni fihristteki temiz yazı (sayfa işaretleri korunur)
                     isaret = "".join("\ue002" + e + "\ue003" for e in SAYFA_ISARET.findall(metin))
+                    notlar_b = "".join(re.findall(r"\{\{n\d+\}\}", metin))
+                    if notlar_b:  # 0.5.41: başlıktaki dipnot ("Âlem-i Ceberût [15]"): fihristteki "[15]" yerine bağlı atıf
+                        baslik = re.sub(r"\s*(?:[\[\(]\s*\d{1,3}\s*[\]\)]|\(\*{1,3}\))\s*$", "", baslik) + notlar_b
                     ogeler.append({"tur": "baslik", "metin": isaret + baslik, "boy": 0, "seviye": seviye, "fihrist": True})
                     continue
             if not metin or (TS.PAGE_NUM.match(metin) and "\ue002" not in metin):
                 continue
-            if el.name[0] == "h" and el.name[1:].isdigit() and not fihrist:
+            if el.name[0] == "h" and el.name[1:].isdigit() and _baslik_cumlesi(metin):
+                ogeler.append({"tur": "p", "metin": metin, "boy": 0})   # 0.5.41: başlık etiketli soru/cümle satırı
+            elif el.name[0] == "h" and el.name[1:].isdigit() and not fihrist:
                 ogeler.append({"tur": "baslik", "metin": metin, "boy": 7 - int(el.name[1])})
             elif el.name[0] == "h" and el.name[1:].isdigit() and not _NOT_BASLIK.match(metin):
                 # fihristte olmayan gerçek başlık etiketi (h1-h6): fihristteki son başlığın bir alt seviyesi
                 ogeler.append({"tur": "baslik", "metin": metin, "boy": 0, "seviye": min(son_seviye + 1, 3), "fihrist": True})
             else:
                 ogeler.append({"tur": "p", "metin": metin, "boy": 0})
+    if not fihrist and not any(o["tur"] == "baslik" for o in ogeler):
+        _etiketsiz_basliklar(ogeler)   # 0.5.41: hiç başlık etiketi olmayan EPUB (Makâlât: "GiRiŞ", "Şems'in Ailesi")
     if not fihrist:  # kitabın fihristi yoksa: Stüdyo'nun kuralı (ilk içerik başlığından başlat) ve ön temizlik
         yazilar = [SAYFA_ISARET.sub("", o["metin"]) for o in ogeler]
         temiz = TS.paragraflari_bastan_temizle(yazilar)
@@ -3503,6 +3622,78 @@ def _konusma_cizgileri(metinler):
     return [_KONUSMA_KISA.sub(r"\1—", t) for t in metinler]
 
 
+_I_KELIME = re.compile(r"(?<![^\W\d_])(?<!['’])[^\W\d_]*I[^\W\d_]*(?![^\W\d_])")
+_ROMA = re.compile(r"[IVXLCDM]+")
+
+
+def _noktasiz_I_kelime(w):
+    """0.5.41: büyük harfli (ILGILI) ya da büyük I ile başlayan (Ikincisi, Imparator) kelime Türkçe kelime listesinde yoksa:
+    listede I'ları i olan hâli varsa (yalnız I'lar değişerek) o yazılır (İLGİLİ, İkincisi); listede de yoksa baştaki I, ı ile
+    başlayan Türkçe kök değilse İ olur (İmparatorluğundan). Listedeki kelimeye (IŞIK, AYNI, ILIK), Roma rakamına (II, XXI) ve
+    karışık yazılı kelimeye (ÂISha) dokunulmaz. (Zemberek ı/i ayırmadığı için ölçü kelime listesi.)"""
+    if len(w) < 3 or _ROMA.fullmatch(w) or not (w.isupper() or (w[0] == "I" and w[1:].islower())):
+        return w
+    kelimeler, iskelet = DZ._sozluk()
+    k = DZ._kucuk(w)
+    if k in kelimeler or k.translate(DZ._SAPKA) in kelimeler:
+        return w
+    aday = iskelet.get(k.translate(DZ._TR_ISKELET))
+    if aday and len(aday) == len(k) and aday != k and all(a == b or (b == "ı" and a == "i" and w[i] == "I")
+                                                           for i, (a, b) in enumerate(zip(aday, k))):
+        return "".join("İ" if (c == "I" and aday[i] == "i") else c for i, c in enumerate(w))
+    if w[0] == "I" and not k.startswith(_I_TURKCE_BAS) and \
+            (("i" + k[1:]) in kelimeler or (DZ.gecerli_mi("i" + k[1:]) and len(w) >= 4)):
+        return "İ" + w[1:]
+    return w
+
+
+def _noktasiz_I_onar(p):
+    if "I" not in p or metin_dili([p]) != "tr":   # yabancı dildeki paragraf (kaynakça: India, International, l'Islam)
+        return p
+    yabanci = _DIL_KELIME["en"] | _DIL_KELIME["fr"] | {"of", "l", "d", "al", "studies", "journal", "law", "islamic", "muslim"}
+
+    def degis(m):
+        komsu = re.findall(r"[^\W\d_]+", p[max(0, m.start() - 40):m.end() + 40].lower())
+        if any(k in yabanci for k in komsu):
+            return m.group()   # yabancı ad/başlık içinde (Studies in Islamic Law, l Islam)
+        return _noktasiz_I_kelime(m.group())
+    return _I_KELIME.sub(degis, p)
+
+
+_NOKTALAMA_BITISIK = re.compile(r"(?<![^\s(“\"«‘'])([^\W\d_]{2,})([.:;,])([a-zçğıöşüâîû][^\W\d_]+)(?![^\W\d_]|[.:][^\W\d_])")
+_KISALTMA = {"vb", "vs", "bkz", "bk", "age", "agm", "yay", "çev", "haz", "nşr", "thk", "ed", "krş", "md", "no", "vd", "dr", "prof",
+             "doç", "hz", "sav", "ra", "as", "www", "http", "https"}
+
+
+_AYRI_SOZ = {"de", "da", "ki", "mi", "mı", "mu", "mü", "ne", "ya", "ve", "o", "bu", "şu", "ben", "sen", "biz", "siz", "bir", "ile",
+             "hem", "ama", "çok", "en", "ise", "her"}
+
+
+def _noktalama_boslugu(p):
+    """0.5.41: iki kelime arasında boşluksuz noktalama (OCR ve dönüştürme artığı): virgül, noktalı virgül ve iki noktadan
+    sonra boşluk girer (cemiyet:içinde, ki,sen); iki küçük harfli kelime arasındaki nokta cümle sonu olamaz: noktasız hâli
+    tek kelimeyse silinir (uyma.yı, burha.na), değilse boşluk olur (da.onun, ve.konuşmaktan). Kısaltma (vb., bkz.), adres
+    (www.), sayı ve "s.a.v." gibi harf dizileri dokunulmaz."""
+    if not re.search(r"[^\W\d_][.:;,][a-zçğıöşüâîû]", p):
+        return p
+
+    def degis(m):
+        a, n, b = m.groups()
+        if not re.fullmatch(r"[^\W\d_][a-zçğıöşüâîûêô]+", a) or not b.islower():
+            return m.group(0)   # içinde büyük harf olan OCR parçası (sO.ret, MO.siki)
+        if DZ._kucuk(a) in _KISALTMA or DZ._kucuk(b) in _KISALTMA or re.search(r"(com|org|net|tr)$", b):
+            return m.group(0)
+        if n in ".:":
+            if DZ._kucuk(b) not in _AYRI_SOZ and _gecerli_kelime(a + b) and \
+                    (len(b) <= 3 or not (_gecerli_kelime(a) and _gecerli_kelime(b))):
+                return a + b
+            if not (_gecerli_kelime(a) and _gecerli_kelime(b)):
+                return m.group(0)
+            return a + " " + b if n == "." else a + ": " + b
+        return a + n + " " + b if _gecerli_kelime(a) and _gecerli_kelime(b) else m.group(0)
+    return _NOKTALAMA_BITISIK.sub(degis, p)
+
+
 def _duzelt(metinler, onar=None, yer="metin"):
     """Stüdyo düzeltmeleri (sayfa atıfları KORUNUR: kitabın basılı sayfa numaraları EPUB'da var).
     onar: hangi kelime onarımları yapılsın (PDF'te hepsi; metin kaynağında onarim_gereksinimi'ne göre)."""
@@ -3513,9 +3704,13 @@ def _duzelt(metinler, onar=None, yer="metin"):
         p0 = p
         p = DZ.satir_ici_ust_bilgileri_sil(p, basliklar)
         p = DZ.cop_isaretleri_sil(p)
+        turkce = onar.get("turkce", True)
         if onar["tire"]:
             p = re.sub(r"(?<=[^\W\d_])-\s*(\ue002[^\ue003]{1,20}\ue003)\s*(?=[a-zçğıöşüâîû])", r"\1", p)  # 0.5.13
             p = DZ.satir_ici_tireleri_birlestir(p)
+        elif turkce:   # 0.5.41: onarım kapalıyken de (metin kaynağı, PDF metin katmanı) yalnız geçerli birleşim
+            p = DZ.satir_ici_tireleri_birlestir(p, yalniz_bosluklu=True, kati=True)
+            p = DZ.ic_tireleri_birlestir(p)
         if onar["bolunmus"] and hasattr(DZ, "bolunmus_kelimeleri_birlestir"):  # "oldu ğundan" -> "olduğundan"
             p = DZ.bolunmus_kelimeleri_birlestir(p)
         p = re.sub(r"(?<=[^\W\d_])\s+([’'])(\s+(?=[^\W\d_])|(?=[a-zçğıöşüâîû]{1,6}(?![^\W\d_])))", r"\1", p)
@@ -3525,6 +3720,9 @@ def _duzelt(metinler, onar=None, yer="metin"):
         p = re.sub(r"\s*\(\s*\)", "", p)                                  # silinen numaradan kalan "()"
         if onar["harf"]:
             p = _harf_onar_korumali(p)  # 0.5.32 (DZ.harfleri_onar + 0.5.18 _harf_kaybi_onar, kitabın yazımı korunur)
+        if turkce:
+            p = _noktasiz_I_onar(p)        # 0.5.41: Ikincisi, ILGILI, Imparator (onarım kapalı kitapta da)
+            p = _noktalama_boslugu(p)      # 0.5.41: cemiyet:içinde, da.onun, uyma.yı
         p = re.sub(r"[ \t]{2,}", " ", p).replace(" ,", ",").replace(" .", ".").strip()
         p = re.sub(r"^(\d{1,3}[.)])(?=[^\s\d.)\ue002])", r"\1 ", p)
         R.fark(p0, p, yer)
@@ -3763,6 +3961,58 @@ def kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
         _kitap_baglami_sil()
 
 
+_ISBN = re.compile(r"\bISBN(?:-1[03])?\s*:?\s*[\dXx][\d\s\-–Xx]{8,}")
+
+
+def _yazi(o):
+    return K.NOT_ISARETI.sub("", SAYFA_ISARET.sub("", o["metin"])).strip()
+
+
+def _kitap_sonu_temizle(ogeler, metin_kaynagi):
+    """0.5.41: kitabın sonundaki artıklar silinir (Dinde Kırk: "ISBN 975-290-632-X", tek başına "579"; Kudsî Hadisler: arka kapak
+    OCR çöpü; Kitâbü'l-Burhân: önsözün tekrarı olan arka kapak yazısı, İngilizce çöp). Her yerde: kısa ISBN satırı. Sonda
+    (son 8 öğe, sondan başa, iyi bir paragrafa gelince durulur): tek başına sayı; harfi 3'ten az satır; taranmış kitapta
+    ayrıca kelimelerinin yarıdan çoğu geçersiz kısa satır (başlık da), İngilizce paragraf ve kitabın başka yerindeki
+    paragrafın tekrarı."""
+    out = []
+    for o in ogeler:
+        t = _yazi(o)
+        if _ISBN.search(t) and len(t.split()) <= 25 and not o.get("koru"):
+            R.silindi("ISBN satırı", t)
+            continue
+        out.append(o)
+    ogeler = out
+    govdeler = None
+    sil = 0
+    for o in reversed(ogeler[-8:]):
+        if o.get("koru") or K.NOT_ISARETI.search(o["metin"]):
+            break
+        t = _yazi(o)
+        kel = re.findall(r"[^\W\d_]+", t)
+        cop = (re.fullmatch(r"[\d\s.\-–/]*", t) is not None) or len(_harf_dizi(t)) < 3
+        if not cop and not metin_kaynagi:
+            if len(kel) <= 8:
+                uc = [k for k in kel if len(k) >= 3]
+                iyi = sum(1 for k in uc if DZ._kelime_mi(k) or (len(k) >= 6 and DZ.gecerli_mi(k)))   # Zemberek kısa kelimede gevşek
+                belirti = any(_oc_belirti(k) or not set(DZ._kucuk(k)) & set(_OC_UNLU) for k in kel)   # agggle, Rdst
+                cop = bool(uc) and not re.search(r"\d", t) and not _AR.search(t) and iyi / len(uc) < 0.6 and belirti
+            elif o["tur"] == "p" and len(kel) >= 6 and metin_dili([t]) == "en":
+                cop = True
+            elif o["tur"] == "p" and len(kel) >= 30:
+                if govdeler is None:
+                    govdeler = [_yazi(x) for x in ogeler[:-8] if x["tur"] == "p" and len(x["metin"]) > 150]
+                bas = " ".join(kel[:12])
+                cop = any(bas in " ".join(re.findall(r"[^\W\d_]+", g)) for g in govdeler)
+        if not cop:
+            break
+        sil += 1
+    if sil:
+        for o in ogeler[-sil:]:
+            R.silindi("kitap sonu artığı", _yazi(o))
+        ogeler = ogeler[:-sil]
+    return ogeler
+
+
 def _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     ogeler = _basliklari_denetle(ogeler)
     _seviyeler(ogeler)
@@ -3776,6 +4026,8 @@ def _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
             o["seviye"] = ortak
     ogeler = _basliklari_birlestir(ogeler)
     ogeler = [o for o in ogeler if SAYFA_ISARET.sub("", o["metin"]).strip() or SAYFA_ISARET.search(o["metin"])]
+    if dil == "tr":
+        ogeler = _kitap_sonu_temizle(ogeler, metin_kaynagi)   # 0.5.41
     # tek başına kalmış ayet/madde numarası: sonraki paragrafa (Stüdyo kuralı)
     birlesik, bekleyen = [], None
     for o in ogeler:
@@ -3794,7 +4046,7 @@ def _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     tarama = cik.get("bozuk_katman") or (cik.get("ocr") or 0) >= 0.5 * max(1, cik.get("sayfa") or 1)
     onar = onarim_gereksinimi([o["metin"] for o in ogeler]) if (metin_kaynagi or not tarama) else TUM_ONARIMLAR
     if dil != "tr":   # Türkçe kelime onarımları (Zemberek) yabancı dilde metni bozar
-        onar = {"tire": False, "bolunmus": False, "harf": False}
+        onar = {"tire": False, "bolunmus": False, "harf": False, "turkce": False}
     kunye.setdefault("cikarma", {})["onarim"] = onar
     if not metin_kaynagi and dil == "tr":  # 0.5.25: PDF metin katmanında boşlukla bölünmüş kelimeler
         for o in ogeler:
@@ -3907,6 +4159,20 @@ def _kapak_basligi(ilk_sayfalar):
 
 
 _KUCUK_KAL = {"ve", "ile", "ki", "veya", "ya", "da", "de", "fi", "min", "an", "ala", "li"}
+
+
+def _kunye_bicimi(t):
+    """0.5.41: eser adının yazımı: "Kitabu'l -Burhan" -> "Kitabu'l-Burhan"; tamamı büyük harf ("SİKKE-İ TASDÎK-İ GAYBÎ") ya da
+    tamamı küçük harf ("iman ve küfür muvazeneleri") ad, kelime başları büyük yazılır (bağlaçlar küçük kalır)."""
+    t = re.sub(r"(['’][^\W\d_]{1,2})\s+-\s*(?=[^\W\d_])", r"\1-", (t or "").strip())
+    harf = [c for c in t if c.isalpha()]
+    if len(harf) < 4:
+        return t
+    if all(c.isupper() for c in harf):
+        return turkce_baslik(t)
+    if all(c.islower() for c in harf):
+        return turkce_baslik(_tr_buyuk(t))
+    return t
 
 
 def turkce_baslik(s):
@@ -4212,6 +4478,7 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
         ilerleme("Metin düzeltiliyor")
     ad_baslik, ad_yazar = _dosya_adindan(yol)
     baslik, yazar = _kunye_sec(bilgi, ad_baslik, ad_yazar, os.path.splitext(os.path.basename(yol))[0])
+    baslik = _kunye_bicimi(baslik)   # 0.5.41
     kunye = {
         "baslik": {"tr": baslik},
         "yazar": {"tr": yazar},

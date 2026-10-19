@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import time
+import unicodedata
 
 import requests
 
@@ -91,6 +92,95 @@ def ciktiya_yaz(kit, epublar, epub_klasoru, onceki=None):
 def _temiz(t):
     return re.sub(r"\s+", " ", K.NOT_ISARETI.sub("", t or "")).strip()
 
+# ---------------- 0.5.42: seslendirmeye gitmeyen bölümler ----------------
+# Kitabın ana metni olmayan bölümleri (kaynakça, dizin, sözlük, kısaltmalar, kronoloji, sonnotlar, yanlış-doğru cetveli, yayınevi künyesi)
+# EPUB'da ve PDF/DOCX/TXT/HTML'de kalır; seslendirmeye gitmez (Stüdyo parçası "Ek_": Kitap Okuma yalnız "Parca_" okur).
+def _ses_sade(t):
+    t = K.NOT_ISARETI.sub("", t or "").replace("I", "ı").replace("İ", "i").lower().replace("ı", "i")
+    t = "".join(c for c in unicodedata.normalize("NFD", t) if not unicodedata.combining(c))
+    return " ".join(re.sub(r"[^a-z\s]", " ", t).split())
+
+
+_SES_DISI_AD = re.compile(
+    r"^(?:kaynakca|kaynaklar|bibli[a-z]*|secme bibli[a-z]*|yararlanilan (?:eser|kaynak)[a-z]*|okuma listesi)$"
+    r"|(?:^|\s)dizin[a-z]*$|(?:^|\s)(?:indeks|index)[a-z]*$"
+    r"|(?:^|\s)sozlug[a-z]*$|^sozluk$|^lugat[a-z]*$"
+    r"|^kisaltma[a-z]*$|^kronoloji[a-z]*(?: tablo[a-z]*)?$"
+    r"|^(?:dipnot[a-z]*|notlar|son ?not[a-z]*|aciklamalar)$|\sdipnot[a-z]*$"
+    r"|yanlis.?dogru|dogru.?yanlis|hata.?sevap"
+    r"|(?:^|\s)(?:yayinlari|yayinevi|matbaasi)$")
+_SES_YIL = re.compile(r"\b(?:1[5-9]\d\d|20\d\d)\b")
+_SES_KAYNAK = re.compile(r"\b(?:Yay\.|Yayınları|baskı|bsk\.|ed\.|trans\.|vol\.|Vol\.|pp\.|Press|Verlag|éd\.|Bd\.|Paris|London|Londra|Leiden|"
+                         r"Kahire|Cairo|Beyrut|Beirut|Berlin|Oxford|Cambridge|Leipzig|İstanbul|Ankara|Bulak)\b")
+_SES_NOT = re.compile(r"^\s*\(?\d{1,3}\)?\s*[-—–~.)]+\s*(?P<r>.*)$", re.S)          # not işaretiyle başlayan paragraf
+_SES_NOT_KATI = re.compile(r"^\s*(?:\(\d{1,3}\)|\d{1,3}\s*[-—–~]+)\s*(?P<r>.*)$", re.S)  # "(3) …", "3 — …" (nokta değil)
+_SES_DIZIN = re.compile(r"^[^:.!?]{2,50}:\s*[^.!?]{0,60}?\b\d{1,3}(?:\s*(?:vd\.?|n\.\s*\d+))?(?:\s*[,;]\s*\d{1,3}(?:\s*(?:vd\.?|n\.\s*\d+))?)*\s*\.?$")
+
+
+def _ses_disi_bolum(baslik, metinler):
+    """Bölüm seslendirmeye gitmez mi: (neden) ya da None. baslik: bölüm başlığı (yoksa ""), metinler: bölümün paragrafları."""
+    if baslik and _SES_DISI_AD.search(_ses_sade(baslik)):
+        return "başlık: " + baslik.strip()[:40]
+    m = [K.NOT_ISARETI.sub("", t or "").strip() for t in metinler]
+    m = [t for t in m if t]
+    if len(m) < 5:
+        return None
+    n = len(m)
+    def notmu(t):   # sonnot: "3 — Sübkî, Tabakât, IV, 102" ya da "(3) …"; gövdedeki numaralı paragraf ("3. Hanbeli …") sayılmaz
+        r = _SES_NOT_KATI.match(t)
+        return bool(r) and len(t.split()) <= 60 and bool(re.search(r"\d|,\s*[IVXL]+\s*,", r.group("r")))
+    if sum(1 for t in m if notmu(t)) >= 0.7 * n:
+        return "sonnot"
+    if sum(1 for t in m if _SES_YIL.search(t) and _SES_KAYNAK.search(t)) >= 0.5 * n:
+        return "kaynakça"
+    if sum(1 for t in m if _SES_DIZIN.match(t)) >= 0.5 * n:
+        return "dizin"
+    return None
+
+
+def ses_disi_bloklar(gor, ana_dil="tr"):
+    """{blok kimliği: neden}: kitabın başlıklarıyla ayrılan bölümlerinden seslendirmeye gitmeyenler. Kısa bölüm (5 paragraftan az)
+    iki yanı da gitmeyen bölümse o da gitmez (sonnotların arasındaki 'SONUÇ' alt başlığı)."""
+    bolumler, cur = [], None
+    for b in gor["bloklar"]:
+        if b["tur"] == "baslik" or cur is None:
+            cur = {"baslik": (b["metin"].get(ana_dil) or "") if b["tur"] == "baslik" else "", "bloklar": []}
+            bolumler.append(cur)
+        cur["bloklar"].append(b)
+    nedenler = [_ses_disi_bolum(bo["baslik"], [b["metin"].get(ana_dil) for b in bo["bloklar"] if b["tur"] != "baslik"])
+                for bo in bolumler]
+    # Ana metin dışı bölgenin devamı (alt başlıklarıyla sürer):
+    #  - sonnotlarda ("DİPNOTLAR") alt başlık kitabın önceki bir başlığının tekrarıdır ("BİRİNCİ MES'ELE": o bölümün notları) ya da
+    #    paragraflarının en az %20'si not işaretiyle başlar;
+    #  - dizin/kaynakçada alt başlıklı devam liste biçimindedir (kısa satırlar, çoğu "ad: sayfa": "Bağdat: xx, 218, 221").
+    import difflib
+    bolge = None   # ana metin dışı bölgenin başladığı bölüm sırası
+    for i in range(len(bolumler)):
+        if nedenler[i]:
+            bolge = i if bolge is None else bolge
+            continue
+        if bolge is None:
+            continue
+        ps = [K.NOT_ISARETI.sub("", b["metin"].get(ana_dil) or "").strip() for b in bolumler[i]["bloklar"] if b["tur"] != "baslik"]
+        ps = [t for t in ps if t]
+        bas = _ses_sade(bolumler[i]["baslik"])
+        onceki = [_ses_sade(bo["baslik"]) for bo in bolumler[:bolge] if bo["baslik"]]
+        notlu = any(re.search(r"dipnot|notlar|son ?not|sonnot", _ses_sade(n)) for n in nedenler[bolge:i] if n)
+        if notlu and bas and any(difflib.SequenceMatcher(None, bas, o).ratio() >= 0.85 for o in onceki):
+            nedenler[i] = "sonnot (devam: " + bolumler[i]["baslik"].strip()[:30] + ")"
+        elif notlu and ps and sum(1 for t in ps if _SES_NOT.match(t)) >= 0.2 * len(ps):
+            nedenler[i] = "sonnot (devam)"
+        elif ps and sum(len(t.split()) for t in ps) <= 15 * len(ps) and \
+                sum(1 for t in ps if re.search(r":\s*(?:\d{1,4}|[ivxlc]{2,})\b", t, re.I)) >= 0.5 * len(ps):
+            nedenler[i] = "liste (devam)"
+        else:
+            bolge = None
+    for i in range(1, len(bolumler) - 1):
+        if not nedenler[i] and nedenler[i - 1] and nedenler[i + 1] and len(bolumler[i]["bloklar"]) <= 6:
+            nedenler[i] = "ara"
+    return {b["id"]: n for bo, n in zip(bolumler, nedenler) if n for b in bo["bloklar"]}
+
+
 
 def studyo_parcalari(kit):
     """Kitap -> Stüdyo parçaları: her bölüm bir Parca_ (seslendirmede bir ses parçası), dipnotlar sonda Dipnot_.
@@ -103,22 +193,27 @@ def studyo_parcalari(kit):
     yapi = EPUB._Uretici(gor, [ana_dil]).yapi()
     bloklar = {b["id"]: b for b in gor["bloklar"]}
     parcalar, satirlar = [], []
+    disi = ses_disi_bloklar(gor, ana_dil)   # 0.5.42: kaynakça, dizin, sonnotlar… seslendirmeye gitmez ("Ek_" parçası)
     for bolum in yapi:  # uzun bölüm, paragraf sınırından ~15.000 harflik parçalara (her parça bir ses dosyası)
-        tr, osm, uz = [], [], 0
+        tr, osm, uz, ek = [], [], 0, False
         for bid in bolum["bloklar"]:
             t = _temiz(bloklar[bid]["metin"].get(ana_dil))
             if not t:
                 continue
-            if tr and uz + len(t) > PARCA_HARF:
-                satirlar.append((tr, osm))
+            b_ek = bid in disi
+            if tr and (uz + len(t) > PARCA_HARF or b_ek != ek):
+                satirlar.append((tr, osm, ek))
                 tr, osm, uz = [], [], 0
+            ek = b_ek
             tr.append(t)
             osm.append(_temiz(bloklar[bid]["metin"].get("osm")))
             uz += len(t)
         if tr:
-            satirlar.append((tr, osm))
-    for i, (tr, osm) in enumerate(satirlar, 1):
-        parcalar.append({"name": f"Parca_{i:03d}", "tr": "\n".join(tr), "osm": "\n".join(osm)})
+            satirlar.append((tr, osm, ek))
+    sayac = {False: 0, True: 0}
+    for tr, osm, ek in satirlar:
+        sayac[ek] += 1
+        parcalar.append({"name": f"{'Ek' if ek else 'Parca'}_{sayac[ek]:03d}", "tr": "\n".join(tr), "osm": "\n".join(osm)})
     # dipnotlar: EPUB'daki numaralarla (görünüş sırası)
     sira = []
     for b in gor["bloklar"]:

@@ -1277,6 +1277,125 @@ def _sayfa_no_ve_kenar(rows, h):
     return no or tahmin, kalan  # 0.5.15: kesin numara satırı öncelikli
 
 
+def _satir_gruplari(rows):
+    """Satırlar yukarıdan aşağı, aynı yükseklikteki parçalar bir grupta: [[satır, …], …]."""
+    gruplar = []
+    for r in sorted(rows, key=lambda r: r["top"]):
+        if gruplar and r["top"] < (gruplar[-1][0]["top"] + gruplar[-1][0]["bot"]) / 2:
+            gruplar[-1].append(r)
+        else:
+            gruplar.append([r])
+    return gruplar
+
+
+def _ust_blok(rows, h, ara_ort):
+    """Sayfanın üstünde gövdeden boşlukla ayrılmış kısa satır bloğu (üst bilgi adayı) ya da None. Blok: sayfanın üst %12'sinde
+    başlayan en çok 3 grup; altındaki boşluk en az yarım satır ve kitabın olağan satır arası boşluğunun (ara_ort) iki katı."""
+    gruplar = _satir_gruplari(rows)
+    if len(gruplar) < 4:
+        return None
+    boylar = sorted(r["bot"] - r["top"] for r in rows)
+    satir = boylar[len(boylar) // 2]
+    ust = lambda g: min(r["top"] for r in g)
+    alt = lambda g: max(r["bot"] for r in g)
+    esik = max(0.5 * satir, 2 * ara_ort)
+    j = next((j for j in range(min(3, len(gruplar) - 1)) if ust(gruplar[j]) <= h * 0.12
+              and ust(gruplar[j + 1]) - alt(gruplar[j]) >= esik), None)
+    if j is None:
+        return None
+    # "_6" / "Kitabu'I-Burhin": numara satırının altındaki kısa üst bilgi de bloğa girer (altında daha büyük boşluk varsa)
+    while (j + 2 < len(gruplar) and j < 2 and ust(gruplar[j + 1]) <= h * 0.12 and sum(r["n"] for r in gruplar[j + 1]) <= 6
+           and ust(gruplar[j + 2]) - alt(gruplar[j + 1]) > ust(gruplar[j + 1]) - alt(gruplar[j])):
+        j += 1
+    blok = [r for g in gruplar[:j + 1] for r in g]
+    if alt(blok) > h * 0.16 or sum(r["n"] for r in blok) > 15:
+        return None
+    return blok
+
+
+def _sayfa_ust_bilgileri(satirlar, sayfalar, nolar):
+    """0.5.44 (ana metin planı adım 4, sayfa katmanı): konumla bulunan sayfa üst bilgisi. Sayfanın üstündeki, gövdeden
+    boşlukla ayrılmış kısa satır bloğu (_ust_blok) üst bilgidir, eğer (a) içinde o sayfanın basılı numarası varsa
+    ("Dinde Kirk Prensip Peygambere iman etmek 41": kitap adı, bölüm adı, numara tek satır okunmuş), ya da (b) yazısı kitabın
+    sayfalarının en az %10'unun üst bloğundaki yazıya benziyorsa (OCR her sayfada başka okusa da: "Kitabu'I-Burhin",
+    "K i tibu ' I -Burh a n", "Dunle Kirk Prensip"). Her sayfada aynı yerde duran bölüm başlığı (önceki sayfa hep cümle sonuyla
+    biter: "3. KUDSİ HADİS") üst bilgi sayılmaz. Kural kitapta en az 5 sayfada tutmazsa hiçbir şey silinmez. Satırlar yerinde
+    çıkarılır; silinen sayfa sayısı döner."""
+    import difflib
+    sikis = lambda t: re.sub(r"[^a-zçğıöşüâîû]", "", unicodedata.normalize("NFC", _rakam(t)).lower())
+    ara = sorted(min(r["top"] for r in b) - max(r["bot"] for r in a) for rows in satirlar
+                 for gr in [_satir_gruplari(rows)] for a, b in zip(gr, gr[1:]))
+    ara_ort = max(0, ara[len(ara) // 2]) if ara else 0
+    yazi = lambda blok: " ".join(r["text"] for g in _satir_gruplari(blok) for r in sorted(g, key=lambda r: r["x0"]))
+
+    def numarali(i, m):
+        no = nolar[i] if i < len(nolar) else None
+        if not no or not str(no).isdigit():
+            return False
+        t = _rakam(m)
+        return bool(re.search(rf"(?:^|[\s•|·\-–—_]){no}(?:[\s•|·\-–—_]|\W*$)", t)) and not re.match(rf"\W*{no}\.\s", t)
+    aday = {}
+    for i, rows in enumerate(satirlar):
+        h = sayfalar[i][2]
+        blok = _ust_blok(rows, h, ara_ort)
+        if not blok and len(rows) >= 4:   # numaralı üst bilgi kutusu büyük okunmuş olabilir (boşluk az görünür)
+            ilk = _satir_gruplari(rows)[0]
+            if (min(r["top"] for r in ilk) <= h * 0.12 and max(r["bot"] for r in ilk) <= h * 0.16
+                    and sum(r["n"] for r in ilk) <= 15 and numarali(i, yazi(ilk))):
+                blok = ilk
+        if blok:
+            aday[i] = (blok, yazi(blok))
+    # benzer yazılar tek kümede (OCR farkları); küme temsilcisi en sık yazı. Sıklık ham sayfalardan sayılır (numara satırıyla
+    # aynı hizadaki üst bilgiyi _sayfa_no_ve_kenar zaten çıkarmış olabilir; kitabın üst bilgisi yine tanınsın)
+    say = collections.Counter()
+    for i, (rows, w, h, _) in enumerate(sayfalar):
+        blok = _ust_blok(rows, h, ara_ort)
+        if blok:
+            say[sikis(yazi(blok))] += 1
+    for _, m in aday.values():
+        say.setdefault(sikis(m), 0)
+    temsil, kume = [], collections.Counter()
+
+    def kumesi(k, ekle=True):
+        if len(k) < 5:
+            return None
+        oran = lambda a, b: difflib.SequenceMatcher(None, a, b).ratio()
+        for t in temsil:   # baştaki 0-3 harf OCR artığı olabilir ("_AZ Ki li b u 'I-Burhi n"); başları da benzemeli
+            if any(oran(k[b:b + len(t) + 2], t) >= 0.75 and oran(k[b:b + 8], t[:8]) >= 0.75   # "Sabır Hakkındadır" ≠ "Kalp …"
+                   for b in range(max(1, min(4, len(k) - 4)))):
+                return t
+        if ekle:
+            temsil.append(k)
+            return k
+        return None
+    esle = {}
+    for k, c in say.most_common():
+        esle[k] = kumesi(k)
+        if esle[k]:
+            kume[esle[k]] += c
+    sik = {t for t, c in kume.items() if c >= max(5, 0.1 * len(satirlar))}
+    if sik:
+        anahtar = lambda t: esle.get(sikis(t)) or sikis(t)
+        sik -= _bolum_acilislari(satirlar, sik, anahtar)
+    if sik:   # kitabın üst bilgisi, kutusu büyük okunduğu için boşluğu az görünen sayfada da (Munkız s.73)
+        for i, rows in enumerate(satirlar):
+            if i in aday or len(rows) < 4:
+                continue
+            h, ilk = sayfalar[i][2], _satir_gruplari(rows)[0]
+            m = yazi(ilk)
+            if (min(r["top"] for r in ilk) <= h * 0.12 and max(r["bot"] for r in ilk) <= h * 0.16
+                    and sum(r["n"] for r in ilk) <= 15 and kumesi(sikis(m), ekle=False) in sik):
+                aday[i] = (ilk, m)
+                esle[sikis(m)] = kumesi(sikis(m), ekle=False)
+    sil = {i for i, (_, m) in aday.items() if numarali(i, m) or esle.get(sikis(m)) in sik}
+    if len(sil) < 5:
+        return 0
+    for i in sorted(sil):
+        blok, m = aday[i]
+        satirlar[i][:] = [r for r in satirlar[i] if not any(r is b for b in blok)]
+        R.silindi("sayfa üst bilgisi", f"PDF s.{i + 1}: {m}")
+    return len(sil)
+
 _CUMLE_SONU = re.compile(r"""[.!?…"”’'»):;]\s*$""")
 
 
@@ -1430,6 +1549,41 @@ def _kenar_numarasi_dizisi(sayfa_satirlari):
                 r["text"] = yeni
                 r["n"] = len(yeni.split())
     return [[r for r in rows if r["text"].strip()] for rows in sayfa_satirlari]
+
+
+_KENAR_CIPLAK_BAS = re.compile(r"^(\d{1,3})\s+(?=[^\d\s.)\]:;,-])")
+_KENAR_CIPLAK_SON = re.compile(r"(?<=[^\W\d_]|[.;:!?)\]\"”’'])\s+(\d{1,3})$")   # dizindeki "65, 89" değil
+
+
+def _kenar_numaralari_konumla(sayfa_satirlari):
+    """0.5.44 (sayfa katmanı): metin sütununun dışına taşan çıplak kenar numarası satırla tek satır okunmuş: "21 olmayan
+    unsurlardı" (İslam Hukukuna Giriş: aslın sayfa numaraları sol kenarda; satır sütunun solundan 6 puntodan fazla taşar),
+    sağda "… sonuç 21". Numaradan sonra nokta/parantez gelen satır (Bakara düzeni "13.Onlara", madde "1)") dokunulmaz.
+    Güvenlik: bulunan numaralar kitap boyunca düzenli artan bir dizi olmalı (en az 8, %70'i 1-3 artar)."""
+    bulunan = []
+    for rows in sayfa_satirlari:
+        govde = [r for r in rows if r["n"] >= 4]
+        if len(govde) < 3:
+            continue
+        sol = sorted(r["x0"] for r in govde)[len(govde) // 2]
+        sag = sorted(r["x1"] for r in govde)[len(govde) // 2]
+        for r in rows:
+            m = _KENAR_CIPLAK_BAS.match(r["text"]) if r["x0"] < sol - 6 else None
+            if not m and r["x1"] > sag + 6:
+                m = _KENAR_CIPLAK_SON.search(r["text"])
+            if m and r["n"] >= 4:
+                bulunan.append((r, m, int(m.group(1))))
+    if len(bulunan) < 8:
+        return 0
+    sayi = [b[2] for b in bulunan]
+    if sum(1 for a, b in zip(sayi, sayi[1:]) if 0 < b - a <= 3) < 0.7 * (len(sayi) - 1):
+        return 0
+    for r, m, _ in bulunan:
+        eski = r["text"]
+        r["text"] = (eski[:m.start()] + eski[m.end():]).strip()
+        r["n"] = len(r["text"].split())
+        R.silindi("kenar numarası", eski)
+    return len(bulunan)
 
 
 def _kenar_numaralari_at(rows):
@@ -2424,6 +2578,8 @@ def pdf_oku(yol, ilerleme=None):
         nolar.append(no)
         satirlar.append(kalan)
     nolar = _eksik_numaralari_doldur(nolar)
+    bilgi["ust_bilgi"] = _sayfa_ust_bilgileri(satirlar, sayfalar, nolar)   # 0.5.44
+    bilgi["kenar_no"] = _kenar_numaralari_konumla(satirlar)   # 0.5.44
     satirlar = _kenar_numarasi_dizisi(satirlar)
     bilgi["kapak_baslik"] = _kapak_basligi(satirlar[:3])
     dolu = next((rows for rows in satirlar[:3] if any(_harf(r["text"]) >= 3 for r in rows)), [])

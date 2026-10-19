@@ -18,6 +18,7 @@ import traceback
 import requests
 
 from . import clients, db, textsrc, duzelt
+from .ses import ses_metni
 from .detect import detect_lang, sample_text
 
 TEXT_DIR = os.environ.get("OKUMA_TEXT_DIR", "/okuma-text")
@@ -49,6 +50,7 @@ def parts_to_epub(parts, title, out_path):
     for i, p in enumerate(parts, 1):
         ch = epub.EpubHtml(title=f"{i}", file_name=f"b{i:04d}.xhtml", lang="tr")
         satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for x in p["tr"].split("\n")]  # ayet/madde no okunmaz
+        satirlar = [ses_metni(x) for x in satirlar]  # 0.5.43: yazarın kaynak gösterimleri ("(Kehf, 110)", "(M. 54)", "(Müslim)") okunmaz
         satirlar = [x for x in satirlar if x.strip()]
         # tur 2/C: parçanın ilk satırı (bölüm başlığı) <h1>: Kitap Okuma M4B bölüm adını buradan alır (Bolum_001 yerine)
         bas = f"<h1>{_html.escape(satirlar[0])}</h1>" if satirlar and len(satirlar[0]) <= 120 else ""

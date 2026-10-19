@@ -49,7 +49,14 @@ def kitap_metni(yol):
     if "tr" not in K.diller(K.gorunur(kit)):
         return None, None
     ad = kit["kunye"]["baslik"].get("tr") or ""
-    return ad, [p["tr"] for p in C.studyo_parcalari(kit) if p["name"].startswith("Parca_")]
+    try:   # 0.5.43'ten beri seslendirme EPUB'u kaynak gösterimlerini çıkarır (app.ses): ölçü seslendirilen metni ölçer
+        from app.ses import ses_metni
+    except ImportError:
+        ses_metni = None
+    ps = [p["tr"] for p in C.studyo_parcalari(kit) if p["name"].startswith("Parca_")]
+    if ses_metni:
+        ps = ["\n".join(ses_metni(s) for s in p.split("\n")) for p in ps]
+    return ad, ps
 
 
 def olc(ad, parcalar):

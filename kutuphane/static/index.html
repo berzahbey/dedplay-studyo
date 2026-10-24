@@ -184,6 +184,9 @@ const binlik = n => Number(n || 0).toLocaleString("tr-TR");
 const kelime = n => n >= 1000 ? `${binlik(Math.round(n / 1000))} bin kelime` : `${binlik(n)} kelime`;
 const ilkAd = s => (s || "").split("::")[0].trim();
 let acik = null, yoklama = null;
+// 0.5.45: yoklama (3 sn) listeyi yeniden kurarken açık kitabın ayrıntısı yeniden yüklenmez, aynı kutu yerine taşınır
+// (sayfa kaymaz, ses çalarlar baştan yüklenmez, yazılan künye silinmez). Hiçbir şey değişmediyse sayfaya hiç dokunulmaz.
+let acikKutu = null, acikKid = null, acikAsama = null, sonImza = null;
 
 // ---- sekmeler
 for (const b of document.querySelectorAll('[role="tab"]')) {
@@ -314,13 +317,20 @@ function asamaYazisi(k) {
   if (k.asama === "hata") return E("span", { class: "asama hata" }, "Hata: " + (k.hata || ""));
   return E("span", { class: "asama" }, k.asama || "…");
 }
-async function kitaplar() {
+async function kitaplar(yoklamadan = false) {
   let liste;
   try { liste = await api("/api/kitaplar"); } catch (e) { return; }
   try { isler = Object.fromEntries((await api("/api/jobs")).map(j => [j.id, j])); } catch (e) { isler = {}; }
-  const ul = $("#kitaplar"); ul.replaceChildren(); topluCubukKur(ul);
+  const ul = $("#kitaplar"); topluCubukKur(ul);
+  const suruyor = liste.some(k => !["hazır", "hata"].includes(k.asama)) || Object.values(isler).some(j => j.status === "active");
+  clearTimeout(yoklama); if (suruyor) yoklama = setTimeout(() => kitaplar(true), 3000);
+  const imza = JSON.stringify([acik, [...topluSecili], liste.map(k => [k.kimlik, k.baslik, k.baslik_asil, k.yazar, k.asama, k.hata,
+    k.uyari, (k.epublar || []).length, k.studyo ? sesYazisi(isler[k.studyo.is]) : null])]);
+  if (yoklamadan && imza === sonImza) return;   // değişen yok: sayfaya dokunma
+  sonImza = imza;
+  const y = window.scrollY, yeni = [];
   if (!liste.length) {
-    ul.append(E("li", { class: "bos" }, "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
+    yeni.push(E("li", { class: "bos" }, "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
   }
   for (const k of liste) {
     const li = E("li", { class: k.kimlik === acik ? "acik" : "" },
@@ -334,21 +344,25 @@ async function kitaplar() {
       E("div", { class: "sag" },
         (k.epublar || []).length ? E("a", { class: "btn", href: "/oku/" + encodeURIComponent(k.kimlik) }, "Oku") : null,
         E("button", { class: "btn ghost", type: "button", "aria-expanded": k.kimlik === acik,
-          onclick: () => { acik = acik === k.kimlik ? null : k.kimlik; kitaplar(); } }, k.kimlik === acik ? "Kapat" : "Aç")));
+          onclick: () => { acik = acik === k.kimlik ? null : k.kimlik; acikKutu = null; kitaplar(); } }, k.kimlik === acik ? "Kapat" : "Aç")));
     const sec = E("input", { type: "checkbox", class: "toplu-sec", title: "Toplu silmek için seç",
       style: "position:absolute;left:8px;top:50%;transform:translateY(-50%);width:18px;height:18px;margin:0;cursor:pointer;z-index:2" });
     sec.checked = topluSecili.has(k.kimlik);
     sec.onchange = () => { sec.checked ? topluSecili.add(k.kimlik) : topluSecili.delete(k.kimlik); topluGuncelle(); };
     li.style.position = "relative"; li.style.paddingLeft = "40px"; li.prepend(sec);
-    ul.append(li);
-    if (k.kimlik === acik) ayrinti(k.kimlik, li);
+    yeni.push(li);
+    if (k.kimlik === acik) {
+      if (yoklamadan && acikKutu && acikKid === k.kimlik && acikAsama === k.asama) li.append(acikKutu);   // aynı kutu
+      else { acikAsama = k.asama; ayrinti(k.kimlik, li); }
+    }
   }
+  ul.replaceChildren(...yeni);   // tek seferde: liste bir an boşalıp sayfa yukarı kaymasın
+  if (yoklamadan && window.scrollY !== y) window.scrollTo(0, y);
   topluGuncelle(liste);
-  const suruyor = liste.some(k => !["hazır", "hata"].includes(k.asama)) || Object.values(isler).some(j => j.status === "active");
-  clearTimeout(yoklama); if (suruyor) yoklama = setTimeout(kitaplar, 3000);
 }
 async function ayrinti(kid, li) {
   const kutu = E("div", { class: "ayrinti" }, "Yükleniyor…"); li.append(kutu);
+  acikKutu = kutu; acikKid = kid;
   let d; try { d = await api("/api/kitaplar/" + encodeURIComponent(kid)); } catch (e) { kutu.textContent = e.message; return; }
   kutu.replaceChildren();
   if (d.kunye?.ocr) kutu.append(E("p", { class: "uyari" }, "Bu metin OpenITI'de henüz düzeltilmemiş OCR: resim bağlantıları, varak işaretleri ve naşir dipnot numaraları temizlendi, ama harf hataları kalmış olabilir. Okuma ekranında düzeltebilirsin."));

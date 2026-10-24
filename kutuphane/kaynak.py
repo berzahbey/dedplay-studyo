@@ -1553,6 +1553,7 @@ def _kenar_numarasi_dizisi(sayfa_satirlari):
 
 _KENAR_CIPLAK_BAS = re.compile(r"^(\d{1,3})\s+(?=[^\d\s.)\]:;,-])")
 _KENAR_CIPLAK_SON = re.compile(r"(?<=[^\W\d_]|[.;:!?)\]\"”’'])\s+(\d{1,3})$")   # dizindeki "65, 89" değil
+_KISALTMA_SONU = re.compile(r"(?:^|[\s(\[,;])(?:(?:s|ss|sh|c|no|nr|bk|bkz|bak|vd|vol|p|pp|h|m|ö|öl|ölm)\.|cilt|sayfa)\s*$", re.I)
 
 
 def _kenar_numaralari_konumla(sayfa_satirlari):
@@ -1571,6 +1572,8 @@ def _kenar_numaralari_konumla(sayfa_satirlari):
             m = _KENAR_CIPLAK_BAS.match(r["text"]) if r["x0"] < sol - 6 else None
             if not m and r["x1"] > sag + 6:
                 m = _KENAR_CIPLAK_SON.search(r["text"])
+                if m and _KISALTMA_SONU.search(r["text"][:m.start()]):
+                    m = None   # 0.5.46: "(bak., s. 123" atfın sayısı kenar numarası değil (İslam Hukuku)
             if m and r["n"] >= 4:
                 bulunan.append((r, m, int(m.group(1))))
     if len(bulunan) < 8:
@@ -1656,6 +1659,9 @@ def _sayfa_paragraflari(rows, genislik, govde, kalin_oran, bas_ayri=False, asili
                     _m1, _m0 = _ASILI_NO.match(r["text"]), _ASILI_NO.match(cur[0][1]["text"])
                     if _m1 and _m0 and int(re.match(r"\d+", r["text"]).group(0)) == int(re.match(r"\d+", cur[0][1]["text"]).group(0)) + 1:
                         madde = True   # 0.5.40: ardışık numaralı madde, numaradan sonra boşluk yok ("10. Amel…" / "11.Gök…")
+                if madde and (_KISALTMA_SONU.search(onceki["text"]) or
+                              (r["text"].lstrip()[:5].find(")") > 0 and onceki["text"].count("(") > onceki["text"].count(")"))):
+                    madde = False   # 0.5.46: "(bak., s." / "186) doğan": açık parantezi kapatan sayı madde başı değil (İslam Hukuku)
                 yeni = girinti or bosluk or kisa_son or bool(madde)
                 if asili and yeni and not bosluk and not _ASILI_NO.match(r["text"]) and abs(r["x0"] - asili[1]) < govde * 0.4 \
                         and _ASILI_NO.match(cur[0][1]["text"]):
@@ -4622,6 +4628,70 @@ def _anlamli(s):
     return s and not re.search(r"microsoft|word|untitled|adsız|\.docx?|\.pdf|^[\d\W]+$", s, re.I) and len(s) < 150
 
 
+_DUZ_NOT_BAS = re.compile(r"^\s*\[(\d{1,4})\]\s+(?=\S)")
+_DUZ_NOT_ICI = re.compile(r"(?<=\S)\s?\[(\d{1,4})\]")
+
+
+def _duz_notlari_bagla(ogeler, notlar):
+    """0.5.46 (ana metin planı adım 5): bağlantısız düz dipnotlar. Bazı EPUB'larda (PDF'ten dönüştürülmüş: El-Muvâfakât, Füsus'un Sırları)
+    metinde yalnız düz "[18]" işareti var, notlar da bölüm/kitap sonunda "[18] Sâtibi, el-Muvâfakât, İz Yayıncılık: 3/118" diye sıradan
+    paragraf: dipnot sayılmıyor, seslendiriliyordu. "[n] …" paragrafı, metinde daha önce aynı numaralı ve henüz bağlanmamış "[n]"
+    işareti varsa (en yakını; numaralar bölüm bölüm baştan başlayabilir) dipnot olur: işaret {{nXXXX}} olur, paragraf dipnota taşınır.
+    "[80]âyetindeki …" gibi numaradan sonra boşluk olmayan paragraf (ana metin) aday değildir. İşareti bulunamayan aday, bağlanan bir
+    notla aynı dizideyse (ardışık not paragrafları) yine nottur; dizinin önündeki son metin paragrafının sonuna bağlanır.
+    Güvenlik: en az 10 aday ve adayların en az %80'i işaretle eşleşmeli; yoksa hiçbir şey değişmez. Bağlanan not sayısı döner."""
+    aday = [i for i, o in enumerate(ogeler) if o.get("tur") == "p" and _DUZ_NOT_BAS.match(o["metin"])]
+    if len(aday) < 10:
+        return 0
+    acik = collections.defaultdict(list)   # numara -> [(öğe, başlangıç, bitiş)] bağlanmamış işaretler
+    esles = {}
+    for i, o in enumerate(ogeler):
+        m = _DUZ_NOT_BAS.match(o["metin"]) if o.get("tur") == "p" else None
+        if m and acik[m.group(1)]:
+            esles[i] = acik[m.group(1)].pop()
+        if m:
+            continue   # not paragrafının içindeki "[n]" işaret sayılmaz: not dipnota taşınınca işaret de kaybolurdu (El-Muvâfakât 5 not)
+        for x in _DUZ_NOT_ICI.finditer(o["metin"]):
+            acik[x.group(1)].append((i, x.start(), x.end()))
+    if len(esles) < 0.8 * len(aday):
+        return 0
+    # dizi: art arda gelen aday paragraflar
+    adaylar, diziler = set(aday), []
+    for i in aday:
+        if diziler and diziler[-1][-1] == i - 1:
+            diziler[-1].append(i)
+        else:
+            diziler.append([i])
+    notlu = {}
+    for d in diziler:
+        if not any(i in esles for i in d) and len(d) < 3:
+            continue
+        on = next((k for k in range(d[0] - 1, -1, -1) if ogeler[k].get("tur") == "p" and k not in adaylar), None)
+        for i in d:
+            if i in esles:
+                notlu[i] = esles[i]
+            elif on is not None:
+                notlu[i] = (on, len(ogeler[on]["metin"]), len(ogeler[on]["metin"]))   # paragraf sonu
+    if not notlu:
+        return 0
+    sayac = max([int(g[1:]) for g in notlar if re.fullmatch(r"n\d+", g)] or [0])
+    yerler = collections.defaultdict(list)   # öğe -> [(başlangıç, bitiş, gid)]
+    for i in sorted(notlu, key=lambda i: (notlu[i][0], notlu[i][1], i)):
+        sayac += 1
+        gid = "n%04d" % sayac
+        o, b, e = notlu[i]
+        yerler[o].append((b, e, gid))
+        notlar[gid] = re.sub(r"^[\s.,;:]+", "", _DUZ_NOT_BAS.sub("", ogeler[i]["metin"], count=1)).strip()   # "[47] . Hûd" -> "Hûd"
+        R.silindi("düz dipnot (bağlandı)", ogeler[i]["metin"][:120])
+    for o, ls in yerler.items():
+        t = ogeler[o]["metin"]
+        for b, e, gid in sorted(ls, reverse=True):
+            t = t[:b] + "{{" + gid + "}}" + t[e:]
+        ogeler[o] = dict(ogeler[o], metin=t)
+    ogeler[:] = [o for i, o in enumerate(ogeler) if i not in notlu]
+    return len(notlu)
+
+
 def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
     """Dosya -> kitap.json sözlüğü (Türkçe). kapak_yolu verilirse kitabın kendi kapak görseli oraya (uzantısıyla) yazılır."""
     uzanti = os.path.splitext(yol)[1].lower()
@@ -4630,6 +4700,8 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
         raise ValueError("Desteklenmeyen dosya türü: " + uzanti)
     R.basla()
     ogeler, notlar, bilgi = okuyucu(yol, ilerleme)
+    if uzanti in (".epub", ".docx", ".txt"):
+        bilgi["duz_not"] = _duz_notlari_bagla(ogeler, notlar)   # 0.5.46
     if ilerleme:
         ilerleme("Metin düzeltiliyor")
     ad_baslik, ad_yazar = _dosya_adindan(yol)

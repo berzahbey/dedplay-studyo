@@ -291,9 +291,11 @@ def isci(agir=False):
             if agir:
                 kilit.acquire()  # hafif şeritteki kısa iş bitene kadar bekler
             try:
-                _isle(tur, kid, arg)
+                sonra = _isle(tur, kid, arg)
             finally:
                 kilit.release()
+            if sonra:  # 0.5.47: Osmanlica bitti; ciktilar (EPUB/PDF/DOCX, Studyo) hafif seritte, Osmanlica seridi sonraki kitaba gecer
+                is_ekle(*sonra)
         except IsIptal:
             pass
         except Exception:
@@ -331,8 +333,10 @@ def _isle(tur, kid, arg):
                             durum_yaz(kid, uyari=f"Künyenin Osmanlıcası çevrilemedi: {type(e).__name__}")
             if kid in _silinecek:  # 0.5.19: kitap silinecek: EPUB, Stüdyo ve Osmanlıca zinciri yok
                 return
+            if tur == "osmanlica":
+                return ("osm_cikti", kid)  # 0.5.47: Osmanlica seridi cikti uretimini beklemez
             epub_uret(kid)
-            if tur == "osmanlica":  # tur 2/A: Osmanlıca ve EPUB'lar hazır -> kendiliğinden Stüdyo
+            if tur in ("osmanlica", "osm_cikti"):  # tur 2/A: Osmanlıca ve EPUB'lar hazır -> kendiliğinden Stüdyo
                 _studyoya_zincirle(kid, guncelle=True)
             elif tur in ("epub", "kunye"):  # tur 2/C: okuma ekranında düzeltme -> Stüdyo işi (ses ve biçimler) yenilenir
                 _studyoya_zincirle(kid, guncelle=True, yalniz_var_olan=True)
@@ -357,7 +361,8 @@ def is_ekle(is_turu, kid, arg=None, **durum):
         if is_turu == "epub":
             _bekleyen_epub.add(kid)
     # 0.5.17: yazı işi söyler (Türkçe EPUB hazırken "sırada" yanıltıcıydı); işin türü yeniden başlatma için saklanır
-    yazi = {"osmanlica": "Osmanlıca sırada", "epub": "EPUB sırada", "kunye": "EPUB sırada"}.get(is_turu, "sırada")
+    yazi = {"osmanlica": "Osmanlıca sırada", "epub": "EPUB sırada", "kunye": "EPUB sırada",
+            "osm_cikti": "Çıktılar sırada"}.get(is_turu, "sırada")
     durum_yaz(kid, asama=yazi, hata=None, is_turu=is_turu, is_arg=arg, **durum)
     (_kuyruk_osm if is_turu == "osmanlica" else _kuyruk).put((is_turu, kid, arg, _nesil.get(kid, 0)))
 

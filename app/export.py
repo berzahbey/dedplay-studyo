@@ -204,9 +204,19 @@ def to_docx(job, parts, variant):
     if variant == "osm":
         _rtl(h)
         h.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    # 0.5.47: paragraphs are appended directly to the body (d.add_paragraph scanned the whole body each time:
+    # quadratic, hours for a big book, blocked the Osmanlica lane). sectPr is moved to the end; output is identical.
+    from docx.oxml import OxmlElement
+    from docx.text.paragraph import Paragraph
+    govde = d.element.body
+    sect = govde.sectPr
+    if sect is not None:
+        govde.remove(sect)
     for b in _blocks(parts, variant):
         for kind, t in b:
-            p = d.add_paragraph()
+            el = OxmlElement("w:p")
+            govde.append(el)
+            p = Paragraph(el, d._body)
             r = p.add_run(t)
             if kind == "osm":
                 r.font.size = Pt(15)
@@ -214,6 +224,8 @@ def to_docx(job, parts, variant):
                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             elif variant == "iki":
                 r.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+    if sect is not None:
+        govde.append(sect)
     buf = io.BytesIO()
     d.save(buf)
     return buf.getvalue()

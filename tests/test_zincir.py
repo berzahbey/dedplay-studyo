@@ -13,6 +13,14 @@ from app import birlesik  # noqa: F401  (tek uygulama: önce Kütüphane, sonra 
 from app import clients, db, export, worker
 from app import main as studyo
 from kutuphane import depo, osmanlica
+
+
+
+def _osm_isle(kid, arg):
+    """0.5.47: Osmanlica isi ciktilari hafif seride devreder; test seritleri calistirmadan ikisini sirayla yapar."""
+    sonra = depo._isle("osmanlica", kid, arg)
+    if sonra:
+        depo._isle(sonra[0], sonra[1], None)
 from kutuphane import kitap as K
 
 BASARI = []
@@ -74,7 +82,7 @@ def is_sayisi():
 
 # 1) Osmanlıca işi bitince kendiliğinden Stüdyo'ya
 kitap_kur("tr.kitap")
-depo._isle("osmanlica", "tr.kitap", None)
+_osm_isle("tr.kitap", None)
 d = depo.durum_oku("tr.kitap")
 ok(osm_cagri and d.get("studyo", {}).get("is"), "Osmanlıca bitince kitap kendiliğinden Stüdyo'ya gitti")
 jid = d["studyo"]["is"]
@@ -96,12 +104,12 @@ ok("Hamd Allah'adır." in metin and "الله دوزلتیلمش" in metin and "
 
 # 2) Yeniden Osmanlıca (ör. 'Osmanlıcayı yeniden çevir'): ikinci iş açılmaz
 n = is_sayisi()
-depo._isle("osmanlica", "tr.kitap", "1")
+_osm_isle("tr.kitap", "1")
 ok(is_sayisi() == n and depo.durum_oku("tr.kitap")["studyo"]["is"] == jid, "Stüdyo işi varken yeni iş açılmaz")
 
 # 3) Stüdyo'daki iş silindiyse yeniden gönderilir
 db.delete_job(jid)
-depo._isle("osmanlica", "tr.kitap", None)
+_osm_isle("tr.kitap", None)
 yeni = depo.durum_oku("tr.kitap")["studyo"]["is"]
 ok(yeni != jid and db.get(yeni) is not None, "Stüdyo'da silinen iş için kitap yeniden gider")
 
@@ -109,13 +117,13 @@ ok(yeni != jid and db.get(yeni) is not None, "Stüdyo'da silinen iş için kitap
 kitap_kur("hata.kitap")
 osmanlica.kitabi_cevir = lambda *a, **k: (_ for _ in ()).throw(ConnectionError("kapalı"))
 n = is_sayisi()
-depo._isle("osmanlica", "hata.kitap", None)
+_osm_isle("hata.kitap", None)
 d = depo.durum_oku("hata.kitap")
 ok(is_sayisi() == n and not d.get("studyo") and "Osmanlıca çevrilemediği" in (d.get("studyo_uyari") or ""),
    "Osmanlıca çevrilemezse Stüdyo'ya gitmez, açıklama yazılır")
 ok(d.get("asama") == "hazır", "Kitap yine hazır (Türkçe EPUB)")
 osmanlica.kitabi_cevir = sahte_cevir
-depo._isle("osmanlica", "hata.kitap", "1")
+_osm_isle("hata.kitap", "1")
 d = depo.durum_oku("hata.kitap")
 ok(d.get("studyo") and not d.get("studyo_uyari"), "Osmanlıca sonra başarılı olunca kendiliğinden gider, uyarı kalkar")
 

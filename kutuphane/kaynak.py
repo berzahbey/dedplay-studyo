@@ -1685,6 +1685,142 @@ def _sayfa_paragraflari(rows, genislik, govde, kalin_oran, bas_ayri=False, asili
     return paras
 
 
+# ======================= 0.5.48: dipnot çizgisi (konumla) =======================
+def _sayfa_cizgileri(sayfa, en=520):
+    """Sayfa resmindeki yatay ince çizgiler: [(y, x0, x1)] sayfa boyuna/enine oranla. Taramada çizgi biraz eğik olabilir:
+    3 piksellik şeritte bakılır, küçük boşluklar (enin %1,5'i) birleşir. Çizginin üstü ve altı boş olmalı (yazı satırı değil);
+    en az sayfa eninin %15'i uzunluğunda."""
+    import fitz
+    import numpy as np
+    olcek = en / max(1.0, sayfa.rect.width)
+    pix = sayfa.get_pixmap(matrix=fitz.Matrix(olcek, olcek), colorspace=fitz.csGRAY, alpha=False)
+    a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.stride)[:, :pix.width]
+    koyu = a < 128
+    H, W = koyu.shape
+    if H < 20 or W < 20:
+        return []
+    serit = koyu[:-2] | koyu[1:-1] | koyu[2:]
+    bosluk = max(2, int(W * 0.015))
+    sonuc = []
+    for y in np.where(serit.sum(axis=1) >= W * 0.12)[0]:
+        d = np.diff(np.concatenate(([0], serit[y].astype(np.int8), [0])))
+        bas, son = list(np.where(d == 1)[0]), list(np.where(d == -1)[0])
+        diziler = []
+        for b_, s_ in zip(bas, son):
+            if diziler and b_ - diziler[-1][1] <= bosluk:
+                diziler[-1][1] = s_
+            else:
+                diziler.append([b_, s_])
+        x0, x1 = max(diziler, key=lambda z: z[1] - z[0])
+        if x1 - x0 < W * 0.12:
+            continue
+        # şeritte dolu oran yüksek olmalı (yazı satırının kelimeleri boşluklu)
+        if serit[y, x0:x1].mean() < 0.85:
+            continue
+        bos = lambda yy: 0 <= yy < H and koyu[yy, x0:x1].mean() < 0.15
+        if bos(y - 2) and bos(y + 5):
+            if sonuc and y / H - sonuc[-1][0] < 6.0 / H:
+                continue   # aynı çizginin bir sonraki piksel satırı
+            sonuc.append((y / H, x0 / W, x1 / W))
+    return sonuc
+
+
+def _dipnot_cizgileri(yol, sayfalar, bilgi):
+    """0.5.48 (Tahrif Hareketleri): basılı kitapta dipnotlar gövdeden kısa bir yatay çizgiyle ayrılır. Kitap boyunca en sık
+    görülen çizgi boyu (sayfaların en az %3'ünde, en az 8 sayfada aynı boy ±%1,5 ve metnin sol kenarından başlayan) dipnot
+    çizgisidir; o sayfalarda çizginin altındaki her satır dipnottur (numarası okunamasa, not önceki sayfadan devam etse,
+    sayfanın üst yarısında başlasa da). Çizgisi olmayan kitapta {} döner: eski kurallar aynen çalışır.
+    Dönen: {sayfa sırası: çizginin PDF birimiyle yüksekliği}."""
+    if os.environ.get("DIPNOT_CIZGISI", "1") == "0" or not str(yol).lower().endswith(".pdf"):
+        return {}
+    try:
+        import fitz
+        doc = fitz.open(yol)
+    except Exception:
+        return {}
+    kaynak = bilgi.get("kaynak_sayfa") or []
+    adaylar = {}
+    for i, (rows, w, h, _) in enumerate(sayfalar):
+        ks = kaynak[i] if i < len(kaynak) else (i, None)
+        if not isinstance(ks, (list, tuple)) or ks[1] is not None or not (0 <= ks[0] < len(doc)):
+            continue   # çift sayfa taraması (yarım sayfa): çizgi aranmaz
+        try:
+            c = _sayfa_cizgileri(doc[ks[0]])
+        except Exception:
+            continue
+        if c:
+            adaylar[i] = c
+    n = len(sayfalar)
+    boylar = collections.Counter(round(x1 - x0, 2) for c in adaylar.values() for _, x0, x1 in c if x1 - x0 <= 0.6)
+    if not boylar:
+        return {}
+    # en sık boy (komşu yüzdelerle birlikte: 0,36 ve 0,37 aynı çizgi)
+    tepe = max(boylar, key=lambda b: sum(boylar.get(round(b + d, 2), 0) for d in (-0.01, 0, 0.01)))
+    sonuc = {}
+    for i, c in adaylar.items():
+        rows, w, h, _ = sayfalar[i]
+        dolu = [r for r in rows if r["n"] >= 4]
+        sol = min((r["x0"] for r in dolu), default=None)
+        for y, x0, x1 in c:
+            boy = x1 - x0
+            if y < 0.12 or boy > tepe + 0.015 or boy < max(0.12, tepe * 0.4):
+                continue
+            if sol is not None and abs(x0 * w - sol) > w * 0.04:
+                # metnin sol kenarından başlamıyor (ortalanmış süs çizgisi, başlık altı); ancak sol yanı silik çizginin sağ ucu
+                # olağan çizginin bittiği yerdeyse kısmi çizgidir (aşağıda not biçimi aranır)
+                if not (x0 * w > sol and abs(x1 * w - (sol + tepe * w)) <= w * 0.04):
+                    continue
+            if boy < tepe - 0.015:   # taramada kısmen silik çizgi: altında not biçimi aranır
+                alt = [r for r in rows if r["top"] > y * h]
+                ust = [r for r in rows if r["bot"] < y * h and r["n"] >= 3]
+                o = lambda rs: sorted(r["h"] for r in rs)[len(rs) // 2]
+                if not alt or not (re.match(r"^\s*(?:\ue000)?(?:\d{1,3}|\*{1,3})\b|^\s*[(\[]\d{1,3}[)\]]", alt[0]["text"])
+                                   or (ust and o(alt) < o(ust) * 0.97)):
+                    continue
+            sonuc[i] = y * h
+            break
+    if len(sonuc) < max(8, 0.03 * n):
+        return {}
+    return sonuc
+
+
+def _not_sirasi_guncelle(dip, durum):
+    """0.5.48: dipnot numaralarının kitap boyunca sırası (satır başındaki "564 2000'e Doğru…")."""
+    for r in dip:
+        m = re.match(r"^\s*(?:\ue000)?(\d{1,3})(?:\ue001)?\s*[-–.]?\s+[^\W\d]|^\s*(?:\ue000)?(\d{1,3})(?:\ue001)?\s*[\"“«'‘(]", r["text"])
+        if not m:
+            continue
+        n = int(m.group(1) or m.group(2))
+        if durum["son"] < n <= durum["son"] + 6 or (n == 1 and durum["son"] >= 3):
+            durum["son"] = n
+
+
+def _cizgili_sayfa_ayir(rows, i, cizgi, h, g, durum):
+    """0.5.48: çizgili kitapta sayfa ayrımı. Çizgisi bulunan sayfada çizgiyle; çizgisi silik/bulunamayan sayfada eski kurallar,
+    onlar not bulamazsa kitabın dipnot sırasındaki sonraki numarayla başlayan satır (sayfanın alt %70'inde, sıra en az 5'e
+    ulaşmış: "26 Doğuştan Günümüze Büyük İslâm Tarihi…") ve altı dipnottur."""
+    if i in cizgi:
+        ana, dip = _cizgiyle_ayir(rows, cizgi[i])
+    else:
+        ana, dip = _dipnot_ayir(rows, h, g)
+        if cizgi and not dip and durum["son"] >= 5:
+            for k in range(1, len(rows)):
+                m = re.match(r"^\s*(?:\ue000)?(\d{1,3})(?:\ue001)?\s*[-–.]?\s+[^\W\d]", rows[k]["text"])
+                if m and rows[k]["top"] > h * 0.3 and durum["son"] < int(m.group(1)) <= durum["son"] + 3:
+                    ana, dip = rows[:k], rows[k:]
+                    break
+    if cizgi:
+        _not_sirasi_guncelle(dip, durum)
+    return ana, dip
+
+
+def _cizgiyle_ayir(rows, y):
+    """0.5.48: çizginin altındaki satırlar dipnot (satırın ortası çizginin altında)."""
+    ana = [r for r in rows if (r["top"] + r["bot"]) / 2 < y]
+    dip = [r for r in rows if (r["top"] + r["bot"]) / 2 >= y]
+    return ana, dip
+
+
 def _dipnot_ayir(rows, h, govde):
     """Önce Stüdyo'nun punto kuralı; bulunamazsa: alt yarıda büyük boşluktan sonra rakamla başlayan satırlar."""
     if not rows:
@@ -2619,22 +2755,33 @@ def pdf_oku(yol, ilerleme=None):
     anlamli = [x for x in tum_imler if not re.fullmatch(r"(page|sayfa|pg|p|s)?\.?\s*\d{1,4}|[ivxlcdm]{1,6}", x[1].strip(), re.I)]
     if len(anlamli) < 0.5 * len(tum_imler):
         anlamli = []  # yer imlerinin çoğu "Page 1, Page 2…": tarama programının koyduğu, fihrist değil
+    # 0.5.48: "Tahrif Hareketleri II_ Kadir Mısıroğlu0013": aynı ad + sıra numarası (tarama dosyalarının adı), fihrist değil
+    kok = lambda t: re.sub(r"[\W_]*\d+\s*$", "", t).strip().lower()
+    koklar = collections.Counter(kok(x[1]) for x in anlamli if re.search(r"\d\s*$", x[1]))
+    if len(anlamli) >= 10 and koklar and koklar.most_common(1)[0][1] >= 0.5 * len(anlamli):
+        ortak = koklar.most_common(1)[0][0]
+        anlamli = [x for x in anlamli if not (re.search(r"\d\s*$", x[1]) and kok(x[1]) == ortak)]
     for sv, bas, sy in anlamli:
         if sy - 1 in set(kalan):
             imler[sy - 1].append((min(sv, 3), bas))
     yer_imi_modu = sum(len(v) for v in imler.values()) >= 3
+    cizgi = _dipnot_cizgileri(yol, sayfalar, bilgi)   # 0.5.48: dipnot çizgisi olan sayfalar
+    if cizgi:
+        bilgi["dipnot_cizgisi"] = len(cizgi)
     parcalar = []  # her kalan sayfa: (gövde boyu, dipnot satırları, paragraflar)
+    sira_durum = {"son": 0}
     for j, i in enumerate(kalan):
         g = (govde_o if sayfalar[i][3] else govde_k) or govde
-        ana, dip = _dipnot_ayir(satirlar_k[j], sayfalar[i][2], g)
+        ana, dip = _cizgili_sayfa_ayir(satirlar_k[j], i, cizgi, sayfalar[i][2], g, sira_durum)
         parcalar.append((g, dip, _sayfa_paragraflari(ana, sayfalar[i][1], g, kalin_oran, asili=asili)))
     icindekiler_modu = False
     if not yer_imi_modu and toc_sayfalari:  # yer imi yoksa: basılı içindekiler sayfası fihrist kaynağı
         sira = {i: j for j, i in enumerate(kalan)}
         ayri = []  # başlık satırları ayrı paragraf ("GİRİŞ" + "I. Mantık Nedir?" tek blok olmasın)
+        sira_durum2 = {"son": 0}
         for j, i in enumerate(kalan):
             g, dip, _ = parcalar[j]
-            ana, _ = _dipnot_ayir(satirlar_k[j], sayfalar[i][2], g)
+            ana, _ = _cizgili_sayfa_ayir(satirlar_k[j], i, cizgi, sayfalar[i][2], g, sira_durum2)
             ana = _kisa_parcalari_birlestir(ana)
             ayri.append((g, dip, _sayfa_paragraflari(ana, sayfalar[i][1], g, kalin_oran, bas_ayri=True, asili=asili)))
         toc_imler = icindekiler_fihristi(icindekiler_girdileri([satirlar[i] for i in toc_sayfalari]), nolar, kalan,
@@ -4713,7 +4860,7 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
         "asil_dil": "tr",
         "kaynak": {"tur": "dosya", "ad": os.path.basename(yol), **(kaynak_bilgi or {})},
         "sayfa_kaynagi": "basılı baskı" if uzanti == ".pdf" else "",
-        "cikarma": {k: bilgi.get(k) for k in ("sayfa", "ocr", "bozuk_katman")},
+        "cikarma": {k: bilgi.get(k) for k in ("sayfa", "ocr", "bozuk_katman", "dipnot_cizgisi") if k != "dipnot_cizgisi" or bilgi.get(k)},
         "yapi": bilgi.get("yapi"),  # "fihrist": başlıklar kitabın kendi fihristinden (EPUB) ya da yer imlerinden (PDF)
     }
     dil = metin_dili([o["metin"] for o in ogeler])   # tur 2/B: Türkçe olmayan kitap yalnız kendi dilinde EPUB olur

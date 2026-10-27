@@ -22,7 +22,7 @@ HADIS_KESIN = (r"Buhârî|Buharî|Buhari|Tirmizî|Tirmizi|Ebû Dâvûd|Ebu Davud
 _SURE_RX = re.compile(rf"(?<![\w'’])(?:{SURE})(?:\s+s[ûu]resi)?\s*[,:/]?\s*\d", re.I)
 _SURE_NO = re.compile(rf"\d+\s*/\s*(?:el-)?(?:{SURE})", re.I)
 _HADIS_YALNIZ = re.compile(rf"(?:{HADIS})(?:\s*(?:,|;|ve)\s*(?:{HADIS}))*\.?")
-_KISALTMA = re.compile(r"(?<![\w])(?:s|ss|sh|sf|c|no|nr|vol|bl|bab)\.\s*\d|\b(?:bkz|bk|bak|krş|karş|a\.g\.e|age|a\.g\.m|nşr|neşr|çev|trc|thk|tah|"
+_KISALTMA = re.compile(r"(?<![\w])(?:s|ss|sh|sf|c|no|nr|vol|bl|bab)\.\s*\d|(?<![\w])(?:s|ss|sh|sf|c)\s?:\s*(?:\d|[IVX]+\b)|\b(?:bkz|bk|bak|krş|karş|a\.g\.e|age|a\.g\.m|nşr|neşr|çev|trc|thk|tah|"
                        r"yay|bsk|baskı|hadis no)\b\.?", re.I)
 _TARIH_BASI = re.compile(r"(?:ö|öl|ölm|ölümü|vefatı|vefat|v|d|doğ|doğumu|h|m|hicri|miladi|hicrî|milâdî)\b\.?", re.I)
 _ESER_NO = re.compile(r"[A-ZÇĞİÖŞÜÂÎÛ'’][^()\[\]\d]{1,60}?[,:]?\s*(?:[IVXLC]+\s*,\s*)?\d{1,4}(?:\s*[-–/]\s*\d{1,4})?(?:\s*vd\.?)?\.?")
@@ -44,6 +44,8 @@ def atif_mi(ic):
     m = re.match(r"([A-ZÇĞİÖŞÜ]{1,3})\.\s*(\d+)", c)
     if m:                                                       # (M. 54) sayfa; (H. 505) hicrî, (M. 1058) milâdî yıl kalır
         return not (m.group(1) == "H" or (m.group(1) == "M" and len(m.group(2)) == 4))
+    if re.match(r"(?:bkz|bk|krş|karş)\b\.?|bak\s?[.:]", c, re.I):
+        return True                                             # 0.5.48: "(Bkz: Necmi Uyanık, … Doktora Tezi, … sh: 12)" uzun da olsa
     if len(c.split()) > 8:
         return False                                            # uzun açıklama ("yukarıda s. 182'de sözü edilen durum …") kalır
     if _KISALTMA.search(c) or re.search(HADIS_KESIN, c):

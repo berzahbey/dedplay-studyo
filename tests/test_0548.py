@@ -110,4 +110,30 @@ dene("(bak, ne oldu) kalır", ses_metni("Bir gün (bak, ne oldu) dedi") == "Bir 
 dene("(1953) kalır", ses_metni("o yıl (1953) idi") == "o yıl (1953) idi")
 dene("(no: 5) kalır", ses_metni("sayfa (no: 5)") == "sayfa (no: 5)")
 
+# 10) Latin harfli Arapça ibare: meali varsa okunmaz, yoksa "Arapça ibare"
+dene("ibare + yani meal: ibare okunmaz, meal okunur",
+     ses_metni('er-Râsibî: "-Lâ hükme illâ lillâh!.." yani "Hüküm, ancak Allâh\'ındır!.." diyerek isyan etti.') ==
+     'er-Râsibî: "Hüküm, ancak Allâh\'ındır!.." diyerek isyan etti.',
+     ses_metni('er-Râsibî: "-Lâ hükme illâ lillâh!.." yani "Hüküm, ancak Allâh\'ındır!.." diyerek isyan etti.'))
+dene("ibare + parantezli meal", ses_metni('mensuptu. "Lâ hükme illâ billâh" (Hüküm, yalnız Allâh\'a âittir.) diyerek') ==
+     "mensuptu. (Hüküm, yalnız Allâh'a âittir.) diyerek")
+dene("meali yok: Arapça ibare (cümle bozulmaz)",
+     ses_metni('okudu. "Semiallâhu limen hamideh" ve "Rabbenâ lekel hamd" demeksizin doğruldu.') ==
+     "okudu. Arapça ibare ve Arapça ibare demeksizin doğruldu.")
+dene("âyet ibaresi", ses_metni("Hatta «ve lekad yessernâ'l-Kur'âneli'zzikri fehel min müddekkir» buyrulduğu üzere") ==
+     "Hatta Arapça ibare buyrulduğu üzere")
+for t in ['"İhvanü\'s-Safâ ve Hullenü\'l-Vefâ" adlı cemiyet', 'O da: "-Bir perde arkasından söylüyorlar." dedi.',
+          '"Emr-i bi\'l-ma\'rûf ve nehy-i ani\'l-münker" vazifesi', '"Bâtıl İtikâdî Mezhepler" kitabı', 'Meselâ «Elhamdulillâhi rabbilâlemîn», dedi']:
+    dene("Türkçe / ad / iki kelime değişmez: " + t[:30], ses_metni(t) == t, ses_metni(t))
+
+# 11) OCR döngüsü ve bozuk Arap harfli parça
+dene("OCR döngüsü tek kelimeye iner", ses_metni("الكلمة المراد المراد المراد المراد المراد المراد بها") == "الكلمة المراد بها")
+dene("Latin harfli döngü", ses_metni("Maria Maria Maria Maria Maria geldi.") == "Maria geldi.")
+dene("Urduca harfli OCR çöpü okunmaz", ses_metni("Gazete şöyle yazdı: ڊو رڈ رد ورا جاوليو dedi.") == "Gazete şöyle yazdı: dedi.")
+dene("Farsça/Osmanlıca harfli parça okunmaz", ses_metni("Osmanlıca: آرادم ، نهايت ، پشابل چاملر آراسند. bitti") == "Osmanlıca: bitti")
+ayet = "Bu âyet: يَا أَيُّهَا الَّذِينَ آمَنُوا اذْكُرُوا اللَّهَ ذِكْرًا كَثِيرًا buyruluyor."
+dene("harekeli âyet okunur (değişmez)", ses_metni(ayet) == ayet, ses_metni(ayet))
+for t in ["çok çok güzel", "Allah Allah dedi", "Hû Hû Hû diye zikretti"]:
+    dene("üç tekrara kadar değişmez: " + t, ses_metni(t) == t, ses_metni(t))
+
 print("SONUC: " + ("HEPSI GECTI" if not kalan else f"{len(kalan)} KALDI: " + ", ".join(kalan)))

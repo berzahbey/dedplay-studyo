@@ -4,6 +4,7 @@ seslendirmede okunmamalı"). Yazılı çıktılara (EPUB, PDF, DOCX, TXT, HTML) 
 "Tirmizî, Zühd, 25; İbn Mâce, …"; kitap/sayfa atıfları "(M. 54)", "(bkz. s. 12)", "(Ta'rîfât, 130)", "(Mevzûât el-Ulûm, I, 358)";
 not işaretleri "(3)", "(٢)", "(Haşiye-1)", "…söylemiştir.55". Kalanlar: yıllar ve tarihler "(1953)", "(19 Kasım 1908)", "(ölm. 456/1065)",
 "(H. 505)", açıklama parantezleri "(yani …)", sayı değerleri "(400.000)"."""
+import collections
 import re
 
 SURE = ("Fatiha|Fâtiha|Bakara|Âl-i İmrân|Âl-i İmran|Al-i İmran|Âl-i İmrân|Nisâ|Nisa|Mâide|Maide|En'âm|En‘âm|Enâm|Enam|A'râf|A‘râf|Araf|Enfâl|Enfal|"
@@ -88,18 +89,132 @@ def _parantez(m, S):
     return m.group(0)
 
 
+# ---------- 0.5.48: Latin harfli Arapça ibareler (Zahir, 27 Ekim) ----------
+# Tırnak içindeki Arapça ibare ("«ve lekad yessernâ'l-Kur'âne li'z-zikri…»") Türkçe sesle okununca anlaşılmıyor. Arkasından meali geliyorsa
+# ("… yani 'Hüküm ancak Allah'ındır'", "(Hüküm, yalnız Allah'a âittir.)") ibare okunmaz, meal okunur; meali yoksa yerine "Arapça ibare" okunur
+# (cümle bozulmasın: "«Semiallâhu limen hamideh» ve «Rabbenâ lekel hamd» demeksizin"). Ad ve eser adları (çoğu kelimesi büyük harfle başlayan,
+# arkasından "isimli/adlı…" gelen), Osmanlıca tamlamalar ("Emr-i bi'l-ma'rûf") ve ikiden az kelimeli ibareler okunur.
+_AR_ISLEV = set("fe fî fi min mine alâ ala ilâ ila bi li lâ la innâ inne innemâ innehu kad lekad hüve huve hiye ente ene nahnu mâ ma men "
+                "entüm hum hüm kânû kâne leyse illâ ellezî ellezîne allâhu allâh allâhi rabbi rabbenâ rabbinâ kul emme ammâ seyyidinâ aleyhi "
+                "aleyke aleyküm ve'l ev lev izâ izen sümme hattâ".split())
+_AR_EK = re.compile(r"(?:hu|hû|hum|hüm|kum|küm|ke|kü|nâ|în|ûn|âni|tü|tu|hâ|ehu|uhu)$")
+_AR_TARIF = re.compile(r"\w['’]?(?:l|r|s|n|z|t|d|ş)-\w|['’](?:l|r|s|n|t|d|z)-?\w|\b(?:el|er|es|en|et|ed|ez|eş)-\w", re.I)
+_AR_SONRA = re.compile(r"^\W{0,3}\s*(?:isimli|adlı|adındaki|adında|nâmındaki|namındaki|nam|isminde|ismindeki|başlıklı|unvanlı|ünvanlı|eser|kitab|"
+                       r"risâle|risale|dergi|gazete|mecmua|partisi|cemiyeti|derneği|tarikat)", re.I)
+_AR_TIRNAK = re.compile(r"«([^«»\n]{3,400})»|“([^“”\n]{3,400})”|\"([^\"\n]{3,400})\"")
+_AR_MEAL = re.compile(r"^[\s,:;]*(?:yani|yâni|ya'ni|yânî)\b[\s,:]*|^\s*(?=\((?![^()]*\d)[^()]{8,}\))", re.I)
+
+
+def _ar_nr(w):
+    return re.sub(r"[^a-zçğıöşüâîû'’-]", "", w.replace("İ", "i").replace("I", "ı").lower())
+
+
+def _ar_kelime(w):
+    k = _ar_nr(w).strip("-'’")
+    if not k:
+        return None
+    if k in _AR_ISLEV or _AR_TARIF.search(k):
+        return True
+    if re.search(r"-[ıiuü]$", k):
+        return False                                          # Osmanlıca izafet: Emr-i, Sazmân-ı
+    try:
+        from app import duzelt as DZ
+        if DZ._gecerli_kelime(re.sub(r"[^a-zçğıöşü]", "", k.replace("â", "a").replace("î", "i").replace("û", "u"))):
+            return False
+    except Exception:
+        return False
+    return bool(re.search(r"[âîû]", k) or _AR_EK.search(k) or "'" in k or "’" in k or w.lstrip("-«\"“'(")[:1].islower())
+
+
+def arapca_ibare_mi(ic, sonra=""):
+    """Tırnak içi yazı Latin harfli Arapça ibare mi (0.5.48)."""
+    ws = [w for w in ic.split() if _ar_nr(w).strip("-'’")]
+    if len(ws) < 3 or _AR_SONRA.match(sonra):
+        return False
+    if sum(1 for w in ws if w.lstrip("-«\"“'(")[:1].isupper()) >= 0.6 * len(ws):
+        return False                                          # ad / eser adı: İhvanü's-Safâ ve Hullenü'l-Vefâ
+    if any(re.search(r"-[ıiuü]$", _ar_nr(w)) for w in ws):
+        return False
+    b = [_ar_kelime(w) for w in ws if _ar_nr(w).strip("-'’") != "ve"]   # "ve" iki dilde de var
+    if not b:
+        return False
+    oran = sum(1 for x in b if x) / len(b)
+    islev = sum(1 for w in ws if _ar_nr(w).strip("-'’") in _AR_ISLEV)
+    isaret = islev or re.search(r"[âîû]|['’][lrsntdz]-|allâh|ullâh", ic)
+    return bool(isaret) and (oran >= 0.75 or (oran >= 0.5 and islev >= 1))
+
+
+def _arapca_ibareler(t, S):
+    """Arapça ibare: meali arkasından geliyorsa çıkar (S), gelmiyorsa "Arapça ibare". Değişiklik yoksa t aynen döner."""
+    if not re.search(r"[«“\"]", t):
+        return t
+    parca, son = [], 0
+    for m in _AR_TIRNAK.finditer(t):
+        ic = next(g for g in m.groups() if g is not None)
+        sonra = t[m.end():]
+        if not arapca_ibare_mi(ic, sonra[:40]):
+            continue
+        parca.append(t[son:m.start()])
+        meal = _AR_MEAL.match(sonra)
+        if meal:
+            parca.append(S)
+            son = m.end() + meal.end()
+        else:
+            parca.append("Arapça ibare")
+            son = m.end()
+    if not parca:
+        return t
+    parca.append(t[son:])
+    return "".join(parca)
+
+
+# ---------- 0.5.48: OCR'ın uydurduğu tekrarlar ve bozuk Arap harfli satırlar (Zahir, 27 Ekim) ----------
+# Surya taramada okuyamadığı satırda bir kelimeyi döngüye girip 10-20 kez yazabiliyor ("المراد المراد المراد …", "Maria Maria …"): art arda
+# 4 ve daha çok aynı kelime tek kelimeye iner. Arap harfli parça Arapça sesle (FastPitch) okunur; Urduca harfli (OCR çöpü: "ڊو رڈ"),
+# Farsça/Osmanlıca harfli (پ چ ژ گ ڭ: Arapça ses okuyamaz), çoğu tek-iki harfli parçalardan oluşan ya da döngülü parça okunmaz.
+_TEKRAR = re.compile(r"(?<!\S)(\S{1,30})(?:[\s،,.]+\1(?!\S)){3,}")
+_ARAP_PARCA = re.compile(r"[؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿][؀-ۿݐ-ݿﭐ-﷿ﹰ-﻿\sً-ٰٟ"
+                         r"،؛؟.:!?()\-0-9٠-٩۰-۹«»\"]*")
+_URDU = re.compile(r"[ٹڈڑںھےۓڊڻ۽ڙڳڱ]")
+_FARSCA = re.compile(r"[پچژگڭ]")
+_OSMANLI = re.compile(r"[\u06A9\u06CC\u06D5\u06C0]")   # ک ی ە ۀ
+
+
+def _arap_bozuk(p):
+    harfli = re.findall(r"[ء-يٱ-ۓ]+", re.sub(r"[ً-ٰٟ]", "", p))
+    if not harfli:
+        return False
+    if _URDU.search(p) or _FARSCA.search(p) or _TEKRAR.search(p):
+        return True
+    hareke = len(re.findall(r"[\u064B-\u0652]", p))
+    if hareke < 0.05 * sum(len(w) for w in harfli) and _OSMANLI.search(p):
+        return True                                   # harekesiz Farsça/Osmanlıca yazı (ک ی ە): belge, gazete resmi
+    say = collections.Counter(harfli)
+    if len(harfli) >= 6 and say.most_common(1)[0][1] >= max(4, 0.25 * len(harfli)):
+        return True                                   # bitişik yazılmış döngü: "المعارض المعارالمعارض المعارض …"
+    kisa = sum(1 for w in harfli if len(w) <= 2)
+    return len(harfli) >= 3 and kisa > 0.5 * len(harfli)
+
+
+def _ocr_artiklari(t, S):
+    y = _TEKRAR.sub(lambda m: m.group(1), t)
+    return _ARAP_PARCA.sub(lambda m: S if _arap_bozuk(m.group(0)) else m.group(0), y)
+
+
 def ses_metni(t):
     """Seslendirmeye giden bir satırdan kaynak gösterimlerini çıkarır. Kaynak gösterimi olmayan satır olduğu gibi kalır."""
     if not t:
         return t
     S = "\u0000"   # çıkan yerin işareti: yalnız orada boşluk/noktalama toplanır (öteki satırlar değişmez, sesi yeniden üretilmez)
-    y = _PARANTEZ.sub(lambda m: _parantez(m, S), t)
+    y = _arapca_ibareler(_ocr_artiklari(_ocr_artiklari(t, S), S), S)   # 0.5.48 (iki kez: tekrar silinince Arapça parça yeniden ölçülür)
+    ar = y != t
+    y = _PARANTEZ.sub(lambda m: _parantez(m, S), y)
     y = _ZINCIR.sub(lambda m: S if _zincir_mi(m.group(0)) else m.group(0), y)
     y = _SURE_KIRIK.sub(S, y)
     y = _SURE_DISARI.sub(S, y)
     y = _YAPISIK_NO.sub(S, y)
     if S not in y:
-        return t
+        return y if ar else t
     y = re.sub(r"\s*\u0000[\s\u0000]*(?=[.,;:!?»”’)]|$)", "", y)
     y = re.sub(r"\s*\u0000[\s\u0000]*", " ", y)
     y = re.sub(r"([,;])\s*(?=[,;.])", "", y)

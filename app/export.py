@@ -38,6 +38,7 @@ def _blocks(parts, variant):
     """Her parça için [(tür, paragraf), ...] listesi."""
     out = []
     for p in parts:
+        p = dict(p, tr=(p["tr"] or "").replace("\ue020", "").replace("\ue021", ""))   # 0.5.52: okunmaz işareti yalnız seste
         b = []
         if variant == "iki":
             # Satırlar KONUMLARIYLA eşleştirilir (boş satırlar atılmadan): Osmanlıca tarafında boş kalan

@@ -205,7 +205,13 @@ def ses_metni(t):
     """Seslendirmeye giden bir satırdan kaynak gösterimlerini çıkarır. Kaynak gösterimi olmayan satır olduğu gibi kalır."""
     if not t:
         return t
-    S = "\u0000"   # çıkan yerin işareti: yalnız orada boşluk/noktalama toplanır (öteki satırlar değişmez, sesi yeniden üretilmez)
+    S = "\u0000"
+    if "\ue020" in t or "\ue021" in t:   # 0.5.52: Hazırlık'ın okunmaz işaretli parçası (kaynak, dipnot no, kaynak satırı) okunmaz
+        t = re.sub("\ue020[^\ue021]*\ue021", S, t).replace("\ue020", "").replace("\ue021", "")
+        y = ses_metni(t.replace(S, " \ue022 "))
+        y = re.sub(r"\s*\ue022[\s\ue022]*(?=[.,;:!?»”’)]|$)", "", y)
+        return re.sub(r"\s*\ue022[\s\ue022]*", " ", y).strip()
+    # çıkan yerin işareti: yalnız orada boşluk/noktalama toplanır (öteki satırlar değişmez, sesi yeniden üretilmez)
     y = _arapca_ibareler(_ocr_artiklari(_ocr_artiklari(t, S), S), S)   # 0.5.48 (iki kez: tekrar silinince Arapça parça yeniden ölçülür)
     ar = y != t
     y = _PARANTEZ.sub(lambda m: _parantez(m, S), y)

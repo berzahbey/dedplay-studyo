@@ -31,6 +31,55 @@ import time
 SURUM = 1
 NOT_ISARETI = re.compile(r"\{\{(n\d{4,})\}\}")
 
+# 0.5.52: seslendirmede okunmayacak parça (Dedplay Hazırlık'ın temiz EPUB'unda <span class="okunmaz" data-ses="yok">):
+# blokta "ses_yok": {"tr": [{"once": "…", "metin": "…"}]} olarak saklanır (metin değişmez, bütün çıktılarda görünür);
+# yalnız Stüdyo parçalarında \ue020…\ue021 ile işaretlenir, seslendirme (app/ses.ses_metni) bunu atlar, biçimler siler.
+SES_AC, SES_KAPA = "\ue020", "\ue021"
+_SES_PARCA = re.compile("\ue020([^\ue020\ue021]*)\ue021")
+
+
+def _ses_sade(s):
+    s = re.sub("\ue002[^\ue003]{0,20}\ue003", "", s or "")
+    return re.sub(r"\s+", " ", NOT_ISARETI.sub("", s))
+
+
+def ses_yok_ayir(metin):
+    """İşaretli metin -> (işaretsiz metin, [{"once", "metin"}]). Bağlam ("once") parçanın önündeki son 30 harf."""
+    if SES_AC not in (metin or ""):
+        return metin, []
+    metin = re.sub("\ue021(\\s*)\ue020", r"\1", metin)   # bitişik parçalar tek parça
+    liste = []
+    for m in _SES_PARCA.finditer(metin):
+        parca = _ses_sade(m.group(1)).strip()
+        if parca:
+            once = _ses_sade(metin[:m.start()].replace(SES_AC, "").replace(SES_KAPA, "")).rstrip()
+            liste.append({"once": once[-30:], "metin": parca})
+    return metin.replace(SES_AC, "").replace(SES_KAPA, ""), liste
+
+
+def ses_yok_isaretle(t, liste):
+    """Stüdyo parçasının satırına (boşlukları sadeleşmiş blok metni) okunmaz işaretlerini koyar. Bulunamayan parça atlanır."""
+    if not liste or not t:
+        return t
+    out, poz = [], 0
+    for x in liste:
+        s = x.get("metin") or ""
+        adaylar, i = [], t.find(s, poz)
+        while s and i >= 0:
+            adaylar.append(i)
+            i = t.find(s, i + 1)
+        if not adaylar:
+            continue
+        once = (x.get("once") or "")[-20:]
+        i = next((a for a in adaylar if t[:a].rstrip().endswith(once)), adaylar[0])
+        out += [t[poz:i], SES_AC, s, SES_KAPA]
+        poz = i + len(s)
+    return "".join(out) + t[poz:]
+
+
+def ses_isaretsiz(t):
+    return (t or "").replace(SES_AC, "").replace(SES_KAPA, "")
+
 
 def yeni(kunye):
     return {"surum": SURUM, "kunye": kunye, "bloklar": [], "dipnotlar": {}}

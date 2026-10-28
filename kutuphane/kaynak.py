@@ -2127,6 +2127,22 @@ _SAHTE_UST = re.compile(r"(?<=[^\W\d_][.,;:])\s?[!|?'’”\"°](?=\s|$)")
 _SON_ISARET = re.compile(r"(?<=[.!?…])\s+['’‘\"”|°]$")
 
 
+# 0.5.52: tırnaktan sonra gelen (üst simgesi tırnağa karışmış) dipnot numarası: 'olmuştur. "214', 'nüsha). ''335', 'dedi."238'.
+# Yalnız sayfada o numaralı not varsa bağlanır; tırnak bir açılmış tırnağın kapanışı değilse (artık) silinir.
+TIRNAK_NO = re.compile(r"(?<=[^\W\d_]|[.,;:!?)…])(\s?)([\"”'’]{1,2})(\d{1,3})(?=[\s.,;:!?)]|$)")
+
+
+def _tirnak_no_bagla(m, metin, sayfa_notu, baglanan, bagla):
+    no = int(m.group(3))
+    if no not in sayfa_notu or sayfa_notu[no] in baglanan:
+        return m.group(0)
+    ref = bagla(re.match(r"(\d+)", str(no)))
+    once = metin[:m.start()]
+    if _tirnak_esli(once, m.group(2)[-1]):
+        return m.group(1) + m.group(2) + ref
+    return ref
+
+
 def _tirnak_esli(once, k):
     """Paragraf sonundaki işaret, önceden açılmış bir tırnağın kapanışı mı (gerçek tırnak)?"""
     if k == "”":
@@ -2154,8 +2170,17 @@ def _okunamayan_ust_simge(metin, sayfa_notu, baglanan):
     return metin
 
 
-def _notlari_bol(dip_paras):
-    """Dipnot paragrafları -> [(numara ya da None (devam), metin)]."""
+def _liste_devami(parca, no, bag):
+    """0.5.52: dipnotun içindeki numaralı liste ("7 … Bunlar: 1- Hz. Ebubekir … 12- …" ve sonraki sayfada "13- …"): satır
+    "N-"/"N."/"N)" ile başlıyor ve notun (ya da önceki sayfadaki son notun) içinde bir önceki madde ("N-1-") varsa liste maddesidir,
+    yeni dipnot değildir."""
+    if no < 2 or not re.match(r"^\d{1,3}\s?[-–.)]", parca):
+        return False
+    return bool(re.search(r"(?:^|\s)" + str(no - 1) + r"\s?[-–.)]\s?[^\W\d]", bag or ""))
+
+
+def _notlari_bol(dip_paras, onceki_metin=""):
+    """Dipnot paragrafları -> [(numara ya da None (devam), metin)]. onceki_metin: önceki sayfanın son notu (0.5.52)."""
     out = []
     for p in dip_paras:
         p = UST.sub(r"\1 ", p)
@@ -2172,6 +2197,12 @@ def _notlari_bol(dip_paras):
             m_par = re.match(r"^[(\[](\d{1,3})[)\]]\s*(.*)$", parca, re.S)
             m = m_par or re.match(r"^(\d{1,3})(?:\s?[-–]\s?|[\s.)]+)[-–]?\s?(.*)$", parca, re.S)
             onceki = out[-1][0] if out else None
+            if m and not m_par and _liste_devami(parca, int(m.group(1)), out[-1][1] if out else onceki_metin):
+                if out:
+                    out[-1] = (out[-1][0], out[-1][1] + " " + parca)
+                else:
+                    out.append((None, parca))
+                continue
             # 0.5.13: dipnot içindeki sayı ("zamanımızdan 850 sene evvel") yeni dipnot değildir: çıplak sayı ancak
             # sıradaki numaraysa, parantezli numara önceki numaradan biraz büyükse yeni dipnot sayılır
             if m and (onceki is None or (onceki >= 900 and m_par and int(m.group(1)) == 1) or
@@ -2937,7 +2968,7 @@ def pdf_oku(yol, ilerleme=None):
         dip_paras = [TS.join_lines(r["text"]) for r in dip if not re.fullmatch(r"[\d\s]{1,7}", r["text"].strip())]
         # sayfanın dipnotları: numaralı olanlar yeni, numarasız baştaki parça önceki sayfanın notunun devamı
         sayfa_notu = {}
-        for no, metin in _notlari_bol(dip_paras):
+        for no, metin in _notlari_bol(dip_paras, notlar.get(son_not, "") if son_not else ""):
             if no is None:
                 if son_not:
                     notlar[son_not] += " " + metin
@@ -2962,6 +2993,7 @@ def pdf_oku(yol, ilerleme=None):
                 metin = re.sub(r"(?<=[^\s(\[])\s?[(\[]\s?(\*{1,3})\s?[)\]]",
                                lambda m: bagla(re.match(r"(\d+)", str(900 + len(m.group(1))))), metin)
             if tur == "p" and sayfa_notu:  # okunamamış üst simge: kelimeye yapışık rakam, noktadan sonra "!"
+                metin = TIRNAK_NO.sub(lambda m: _tirnak_no_bagla(m, metin, sayfa_notu, baglanan, bagla), metin)   # 0.5.52
                 metin = YAPISIK.sub(bagla, metin)
                 # parantezli atıf "…bolmaz. (2)" (bir kelimenin/noktalamanın ardından; paragraf başındaki madde no değil)
                 metin = re.sub(r"(?<=[^\s(\[])\s?[(\[]\s?(\d{1,3})\s?[)\]]",
@@ -3406,6 +3438,11 @@ def epub_oku(yol, ilerleme=None):
                 if any(p.name == "a" and p.get("href", "").count("#") and
                        (os.path.basename(p["href"].split("#")[0]) or ad, p["href"].split("#", 1)[1]) in gid_of
                        for p in c.parents if p is not el and p.name == "a"):
+                    continue
+                if any(p.name == "span" and (p.get("data-ses") == "yok" or "okunmaz" in (p.get("class") or []))
+                       for p in c.parents if p is not el) or \
+                        (el.get("data-ses") == "yok" or "okunmaz" in (el.get("class") or [])):
+                    out.append(K.SES_AC + str(c) + K.SES_KAPA)   # 0.5.52: Hazırlık'ın okunmaz işareti (seslendirmede atlanır)
                     continue
                 out.append(str(c))
             elif c.name == "a" and "#" in c.get("href", ""):
@@ -4540,6 +4577,7 @@ def _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
     for o, metin in zip(ogeler, duz):
         if cop_not:
             metin = K.NOT_ISARETI.sub(lambda m: "" if m.group(1) in cop_not else m.group(0), metin)
+        metin, ses_yok = K.ses_yok_ayir(metin)   # 0.5.52: okunmaz parçalar metinde kalır, blokta ayrıca saklanır
         temiz, sayfalar = _konumlar(metin)
         yazi = K.NOT_ISARETI.sub("", temiz).strip()
         ocr_cop = (not metin_kaynagi and dil == "tr" and o["tur"] in ("p", "baslik") and not o.get("koru")
@@ -4556,9 +4594,10 @@ def _kitaba_cevir(ogeler, notlar, kunye, metin_kaynagi=False, dil="tr"):
             if len(temiz2) == len(temiz):  # uzunluk aynı kalır (harf değişimi): sayfa konumları geçerli
                 R.fark(temiz, temiz2, "başlık")
                 temiz = temiz2
-            K.blok_ekle(kit, "baslik", {"tr": temiz}, seviye=o.get("seviye", 1), sayfalar=sayfa)
+            K.blok_ekle(kit, "baslik", {"tr": temiz}, seviye=o.get("seviye", 1), sayfalar=sayfa,
+                        ses_yok={"tr": ses_yok} if ses_yok else None)
         else:
-            K.blok_ekle(kit, "p", {"tr": temiz}, sayfalar=sayfa)
+            K.blok_ekle(kit, "p", {"tr": temiz}, sayfalar=sayfa, ses_yok={"tr": ses_yok} if ses_yok else None)
     kullanilan = set()
     for b in kit["bloklar"]:
         kullanilan |= set(K.NOT_ISARETI.findall(b["metin"]["tr"]))

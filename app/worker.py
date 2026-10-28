@@ -263,7 +263,7 @@ class Worker(threading.Thread):
             end = time.time() + OSM_BUDGET
             pending = db.pending_parts(jid)
             for p in pending:
-                text = p["tr"] or ""
+                text = (p["tr"] or "").replace("\ue020", "").replace("\ue021", "")   # 0.5.52
                 db.save_part(jid, p["idx"], clients.osm_convert_paras(text) if text.strip() else "")
                 if time.time() > end:
                     return

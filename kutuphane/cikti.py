@@ -200,6 +200,7 @@ def studyo_parcalari(kit):
             t = _temiz(bloklar[bid]["metin"].get(ana_dil))
             if not t:
                 continue
+            t = K.ses_yok_isaretle(t, (bloklar[bid].get("ses_yok") or {}).get(ana_dil))   # 0.5.52: seslendirmede atlanır
             b_ek = bid in disi
             if tr and (uz + len(t) > PARCA_HARF or b_ek != ek):
                 satirlar.append((tr, osm, ek))

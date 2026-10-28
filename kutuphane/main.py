@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.49"
+SURUM = "0.5.50"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -315,6 +315,44 @@ def epub_indir(kid: str, dosya: str):
         raise HTTPException(404, "Dosya bulunamadı (yeniden üretiliyor olabilir)")
     return FileResponse(yol, media_type="application/epub+zip",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(dosya)}"})
+
+
+@app.get("/api/kitaplar/{kid}/paket")
+def paket(kid: str):
+    """0.5.50: Mac'teki Dedplay Hazırlık için kitap paketi (zip). Kitaba ve dosyalara dokunmaz (salt okur).
+    İçinde: paket.json, kaynak/<asıl dosya>, ocr_onbellek/<klasör>/s0001.json… (Surya'nın ham satırları: Mac OCR yapmadan
+    kitabı aynı kodla yeniden kurar), kitap.json ve rapor.json (karşılaştırma için)."""
+    import json
+    import tempfile
+    import zipfile
+    from starlette.background import BackgroundTask
+    d = depo.durum_oku(kid) if depo.KIMLIK.match(kid) else None
+    if not d:
+        raise HTTPException(404, "Böyle bir kitap yok")
+    yol = d.get("kaynak_kimlik") or ""
+    if not os.path.isabs(yol) or not os.path.isfile(yol):
+        raise HTTPException(404, "Kitabın kaynak dosyası yok (OpenITI ya da silinmiş): " + (yol or "-"))
+    onb = kaynak._ocr_onbellek_klasoru(yol)
+    ocr = sorted(os.listdir(onb)) if onb and os.path.isdir(onb) else []
+    bilgi = {"paket": 1, "studyo": SURUM, "kimlik": kid, "baslik": d.get("baslik"), "yazar": d.get("yazar"),
+             "kaynak_ad": os.path.basename(yol), "ocr_klasoru": os.path.basename(onb) if onb else None,
+             "ocr_dosya": len(ocr), "surya_anahtari": kaynak._surya_anahtari()}
+    fd, gecici = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(gecici, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("paket.json", json.dumps(bilgi, ensure_ascii=False, indent=1))
+            z.write(yol, "kaynak/" + os.path.basename(yol), compress_type=zipfile.ZIP_STORED)
+            for ad in ocr:
+                z.write(os.path.join(onb, ad), f"ocr_onbellek/{os.path.basename(onb)}/{ad}")
+            for ad in ("kitap.json", "rapor.json"):
+                if os.path.isfile(os.path.join(depo.klasor(kid), ad)):
+                    z.write(os.path.join(depo.klasor(kid), ad), ad)
+    except Exception:
+        os.remove(gecici)
+        raise
+    return FileResponse(gecici, media_type="application/zip", background=BackgroundTask(os.remove, gecici),
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(kid)}.zip"})
 
 
 @app.delete("/api/kitaplar/{kid}")

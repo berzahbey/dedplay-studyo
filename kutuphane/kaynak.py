@@ -1685,6 +1685,132 @@ def _sayfa_paragraflari(rows, genislik, govde, kalin_oran, bas_ayri=False, asili
     return paras
 
 
+# ======================= 0.5.51: sayfa düzeni — resim içindeki yazılar (taslak 27 Ekim, ölçülüp 28 Ekim kuruldu) =======================
+# Taranmış kitapta kitaba resim olarak konmuş gazete sayfası, belge, fotoğraf ve altındaki isim etiketi OCR'la okunup ana metne karışıyor
+# (Tahrif Hareketleri: Osmanlıca gazete kupürleri, mahkeme kararı, "Hüseyin Câhid Yalçın" fotoğraf altı cümle ortasında). Surya'nın sayfa
+# düzeni modeli (imajda var) resim/şekil bölgelerini bulur; içlerindeki satırlar metinden çıkar (rapor: "resim içi yazı"). Resmin olduğu
+# sayfada kısa resim altı yazısı (en çok 2 satır, 15 kelime) da çıkar. Sonuç OCR önbelleğinin yanında saklanır (d0001.json…), yeniden
+# işlemede model çalışmaz. DUZEN=0 kapatır. Model yoksa ya da sayfa OCR'lı değilse hiçbir şey değişmez.
+_DUZEN_YUK = 1024
+_duzen = None
+
+
+def _duzen_hazir():
+    global _duzen
+    if _duzen is None:
+        try:
+            if os.path.isdir("/data"):
+                os.environ.setdefault("MODEL_CACHE_DIR", "/data/modeller/surya")
+            os.environ.setdefault("TORCH_DEVICE", "cpu")
+            from surya.layout import LayoutPredictor
+            _duzen = LayoutPredictor()
+        except Exception as e:
+            print(f"Sayfa düzeni modeli yüklenemedi (resim katmanı kapalı): {type(e).__name__}: {e}")
+            _duzen = False
+    return _duzen or None
+
+
+def _duzen_anahtari():
+    try:
+        from importlib.metadata import version
+        surum = version("surya-ocr")
+    except Exception:
+        surum = "?"
+    return f"duzen-{surum}-y{_DUZEN_YUK}"
+
+
+def _duzen_bolgeleri(yol, sayfalar, bilgi, ilerleme=None):
+    """{sayfa sırası: [(etiket, x0, y0, x1, y1, güven)]} (PDF birimiyle) yalnız OCR'lı sayfalar için; önbellekte yoksa model çalışır."""
+    if os.environ.get("DUZEN", "1") == "0" or not str(yol).lower().endswith(".pdf") or bilgi.get("ocr_motoru") != "surya":
+        return {}   # yalnız Surya'yla okunmuş taranmış kitap (Tesseract'la okunan ve metin katmanlı PDF değişmez)
+    ocrli = [i for i, s in enumerate(sayfalar) if s[3]]
+    if not ocrli:
+        return {}
+    kaynak = bilgi.get("kaynak_sayfa") or []
+    klasor, anahtar = _ocr_onbellek_klasoru(yol), _duzen_anahtari()
+    out, eksik = {}, []
+    for i in ocrli:
+        ks = kaynak[i] if i < len(kaynak) else (i, None)
+        if not isinstance(ks, (list, tuple)) or ks[1] is not None:
+            continue   # çift sayfa taraması: yarım sayfanın koordinatları ayrı, atlanır
+        try:
+            import json
+            with open(os.path.join(klasor, f"d{ks[0] + 1:04d}.json"), encoding="utf-8") as f:
+                k = json.load(f)
+            if k.get("anahtar") == anahtar:
+                out[i] = [tuple(b) for b in k["bolgeler"]]
+                continue
+        except Exception:
+            pass
+        eksik.append((i, ks[0]))
+    if not eksik:
+        return out
+    model = _duzen_hazir()
+    if not model:
+        return out
+    import fitz
+    from PIL import Image
+    doc = fitz.open(yol)
+    for k in range(0, len(eksik), 4):
+        parca = eksik[k:k + 4]
+        try:
+            resimler, olcek = [], []
+            for _, p in parca:
+                z = _DUZEN_YUK / doc[p].rect.height
+                pix = doc[p].get_pixmap(matrix=fitz.Matrix(z, z))
+                resimler.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
+                olcek.append(1 / z)
+            for (i, p), r, o in zip(parca, model(resimler), olcek):
+                bol = [[b.label] + [round(v * o, 1) for v in b.bbox] + [round(float(b.confidence or 0), 3)] for b in r.bboxes]
+                out[i] = [tuple(b) for b in bol]
+                if klasor:
+                    try:
+                        import json
+                        os.makedirs(klasor, exist_ok=True)
+                        hedef = os.path.join(klasor, f"d{p + 1:04d}.json")
+                        with open(hedef + ".tmp", "w", encoding="utf-8") as f:
+                            json.dump({"anahtar": anahtar, "sayfa": p + 1, "bolgeler": bol}, f, ensure_ascii=False)
+                        os.replace(hedef + ".tmp", hedef)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"Sayfa düzeni {[p for _, p in parca]} sayfalarında hata: {type(e).__name__}: {e}")
+        if ilerleme:
+            ilerleme(f"Sayfa düzeni: {min(k + 4, len(eksik))}/{len(eksik)} sayfa")
+    return out
+
+
+_RESIM = ("Picture", "Figure", "Handwriting")   # 0.5.51: el yazısı belge (Tahrif 1 s.393: mektup) de resimdir
+
+
+def _resim_satirlari(rows, bolgeler, w):
+    """0.5.51: resim/şekil bölgesinin içindeki satırlar ve resmin altındaki kısa yazı (sıralar). Bölge gövde metnine benziyorsa
+    (içindeki satırların çoğu tam genişlikte, en az 6 kelimelik düz satır) model yanılmış sayılır, dokunulmaz."""
+    resimler = [b for b in bolgeler if b[0] in _RESIM]
+    if not resimler:
+        return set()
+    if sum(1 for r in rows if r["bot"] - r["top"] > r["x1"] - r["x0"]) * 2 >= len(rows):
+        return set()   # 0.5.51: yan çevrilmiş (yatay basılmış) sayfa: satırlar dikey, düzen kutuları metinle örtüşmez; dokunulmaz
+    icinde = lambda r, b, pay=3: b[1] - pay <= (r["x0"] + r["x1"]) / 2 <= b[3] + pay and b[2] - pay <= (r["top"] + r["bot"]) / 2 <= b[4] + pay
+    genis = max((r["x1"] - r["x0"] for r in rows), default=0)
+    sil = set()
+    for b in resimler:
+        ic = [k for k, r in enumerate(rows) if icinde(r, b)]
+        if not ic:
+            continue
+        govde = [k for k in ic if rows[k]["n"] >= 6 and rows[k]["x1"] - rows[k]["x0"] >= 0.85 * genis]
+        if len(govde) >= 3 and len(govde) >= 0.6 * len(ic):
+            continue
+        sil.update(ic)
+    for b in bolgeler:   # resim altı yazısı: resmin olduğu sayfada kısa "Caption" bölgesi
+        if b[0] != "Caption":
+            continue
+        ic = [k for k, r in enumerate(rows) if icinde(r, b)]
+        if ic and len(ic) <= 2 and sum(rows[k]["n"] for k in ic) <= 15:
+            sil.update(ic)
+    return sil
+
+
 # ======================= 0.5.48: dipnot çizgisi (konumla) =======================
 def _sayfa_cizgileri(sayfa, en=520):
     """Sayfa resmindeki yatay ince çizgiler: [(y, x0, x1)] sayfa boyuna/enine oranla. Taramada çizgi biraz eğik olabilir:
@@ -2711,6 +2837,18 @@ def pdf_oku(yol, ilerleme=None):
     """PDF -> (öğeler, dipnotlar, bilgi). öğe: {'tur': 'baslik'|'p', 'metin', 'boy'} ; metinde sayfa/dipnot işaretleri."""
     _gerekli()
     sayfalar, bilgi = pdf_sayfalari(yol, ilerleme)
+    duzen = _duzen_bolgeleri(yol, sayfalar, bilgi, ilerleme)   # 0.5.51: resim içindeki yazılar metne girmez
+    if duzen:
+        say = 0
+        for i, bol in duzen.items():
+            rows, w, h, o = sayfalar[i]
+            sil = _resim_satirlari(rows, bol, w)
+            if sil:
+                say += len(sil)
+                R.silindi("resim içi yazı", f"PDF s.{i + 1}: " + " / ".join(rows[k]["text"] for k in sorted(sil))[:300])
+                sayfalar[i] = ([r for k, r in enumerate(rows) if k not in sil], w, h, o)
+        if say:
+            bilgi["resim_ici_satir"] = say
     if ilerleme:
         ilerleme("Sayfa yapısı çıkarılıyor")
     n = len(sayfalar)
@@ -4860,7 +4998,8 @@ def cevir(yol, ilerleme=None, kaynak_bilgi=None, kapak_yolu=None):
         "asil_dil": "tr",
         "kaynak": {"tur": "dosya", "ad": os.path.basename(yol), **(kaynak_bilgi or {})},
         "sayfa_kaynagi": "basılı baskı" if uzanti == ".pdf" else "",
-        "cikarma": {k: bilgi.get(k) for k in ("sayfa", "ocr", "bozuk_katman", "dipnot_cizgisi") if k != "dipnot_cizgisi" or bilgi.get(k)},
+        "cikarma": {k: bilgi.get(k) for k in ("sayfa", "ocr", "bozuk_katman", "dipnot_cizgisi", "resim_ici_satir")
+                    if k in ("sayfa", "ocr", "bozuk_katman") or bilgi.get(k)},
         "yapi": bilgi.get("yapi"),  # "fihrist": başlıklar kitabın kendi fihristinden (EPUB) ya da yer imlerinden (PDF)
     }
     dil = metin_dili([o["metin"] for o in ogeler])   # tur 2/B: Türkçe olmayan kitap yalnız kendi dilinde EPUB olur

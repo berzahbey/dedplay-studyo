@@ -201,11 +201,32 @@ def _ocr_artiklari(t, S):
     return _ARAP_PARCA.sub(lambda m: S if _arap_bozuk(m.group(0)) else m.group(0), y)
 
 
+# ---------- 0.5.54: harekesiz Arap harfli satır (Zahir, 27/31 Ekim) ----------
+# Satırın harflerinin çoğu Arap harfiyse ve harekesizse (çoğu resim olarak konmuş Osmanlıca/Arapça belge, gazete ya da Surya'nın bozuk
+# okuduğu Arapça), Arapça sesle anlaşılmıyor: satır okunmaz. Satırda Türkçe varsa (Latin harfli 3+ harfli kelime >= 2) satır okunur;
+# Arap harfli kısmı yukarıdaki kurallara kalır. Üçten az Arapça kelimeli satır ve harekeli âyet/hadis (harekeler Arap harflerinin %5'inden çoksa) okunur.
+_AR_HARF = re.compile(r"[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]")
+_HAREKE = re.compile(r"[\u064B-\u0652]")
+_LATIN_KELIME = re.compile(r"[A-Za-zÇĞİÖŞÜçğıöşüâîûÂÎÛ]{3,}")
+
+
+def harekesiz_arap_satiri(t):
+    harf = [c for c in t if c.isalpha()]
+    ar = [c for c in harf if _AR_HARF.match(c)]
+    if len(ar) < 6 or len(ar) < 0.6 * len(harf) or len(re.findall(r"[\u0621-\u064A\u0671-\u06D3]{2,}", t)) < 3:
+        return False                     # kısa Arapça söz ("الله أكبر") okunur
+    if len(_LATIN_KELIME.findall(t)) >= 2:
+        return False                     # Türkçe de var (meal, açıklama): satır okunur
+    return len(_HAREKE.findall(t)) < 0.05 * len(ar)
+
+
 def ses_metni(t):
     """Seslendirmeye giden bir satırdan kaynak gösterimlerini çıkarır. Kaynak gösterimi olmayan satır olduğu gibi kalır."""
     if not t:
         return t
     S = "\u0000"
+    if harekesiz_arap_satiri(t.replace("\ue020", "").replace("\ue021", "")):
+        return ""                        # 0.5.54
     if "\ue020" in t or "\ue021" in t:   # 0.5.52: Hazırlık'ın okunmaz işaretli parçası (kaynak, dipnot no, kaynak satırı) okunmaz
         t = re.sub("\ue020[^\ue021]*\ue021", S, t).replace("\ue020", "").replace("\ue021", "")
         y = ses_metni(t.replace(S, " \ue022 "))

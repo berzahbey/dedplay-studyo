@@ -127,7 +127,7 @@ for t in ['"İhvanü\'s-Safâ ve Hullenü\'l-Vefâ" adlı cemiyet', 'O da: "-Bir
     dene("Türkçe / ad / iki kelime değişmez: " + t[:30], ses_metni(t) == t, ses_metni(t))
 
 # 11) OCR döngüsü ve bozuk Arap harfli parça
-dene("OCR döngüsü tek kelimeye iner", ses_metni("الكلمة المراد المراد المراد المراد المراد المراد بها") == "الكلمة المراد بها")
+dene("OCR döngüsü tek kelimeye iner", ses_metni("Metinde الكلمة المراد المراد المراد المراد المراد المراد بها yazıyor") == "Metinde الكلمة المراد بها yazıyor")   # 0.5.54: Türkçesiz satır bütünüyle okunmaz
 dene("Latin harfli döngü", ses_metni("Maria Maria Maria Maria Maria geldi.") == "Maria geldi.")
 dene("Urduca harfli OCR çöpü okunmaz", ses_metni("Gazete şöyle yazdı: ڊو رڈ رد ورا جاوليو dedi.") == "Gazete şöyle yazdı: dedi.")
 dene("Farsça/Osmanlıca harfli parça okunmaz", ses_metni("Osmanlıca: آرادم ، نهايت ، پشابل چاملر آراسند. bitti") == "Osmanlıca: bitti")

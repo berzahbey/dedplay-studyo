@@ -13,6 +13,8 @@ from app import birlesik  # noqa: F401  (tek uygulama: önce Kütüphane, sonra 
 from app import clients, db, export, worker
 from app import main as studyo
 from kutuphane import depo, osmanlica
+from kutuphane import yz
+yz.ayar_yaz(seslendirme_otomatik=True)   # 0.5.53: seslendirme kendiliğinden ayarla açılır (varsayılan bekletir)
 
 
 

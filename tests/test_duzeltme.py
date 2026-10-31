@@ -83,6 +83,8 @@ ok(db.get(jid)["ok_state"] == "bekliyor" and db.get(jid)["yenile"] == 0, "bitinc
 
 # Kütüphane: düzeltmeden sonraki EPUB işi var olan Stüdyo işini günceller
 from kutuphane import cikti, depo
+from kutuphane import yz  # noqa: E402
+yz.ayar_yaz(seslendirme_otomatik=True)   # 0.5.53: düzeltmeden sonra seslendirme yenilemesi bu ayarla (varsayılan bekletir)
 cagrilar = []
 cikti.studyo_isi_var = lambda i: True
 cikti.studyoyu_guncelle = lambda kit, i: cagrilar.append(i) or {"is": i}

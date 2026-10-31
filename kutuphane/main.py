@@ -10,13 +10,13 @@ from pydantic import BaseModel
 
 from fastapi import File, UploadFile
 
-from . import cikti, depo, epub, epubcheck, katalog, kaynak, osmanlica
+from . import cikti, depo, epub, epubcheck, katalog, kaynak, osmanlica, yz
 from . import kitap as K
 
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.52"
+SURUM = "0.5.53"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -398,8 +398,69 @@ def studyoya_gonder(kid: str):
         raise HTTPException(503, f"Stüdyo'ya ulaşılamadı: {type(e).__name__}")
     except RuntimeError as e:
         raise HTTPException(502, str(e))
-    depo.durum_yaz(kid, studyo=sonuc)
+    depo.durum_yaz(kid, studyo=sonuc, studyo_uyari=None)
     return sonuc
+
+
+# ---------------- 0.5.53: yapay zekâ denetimi ----------------
+class YzAyar(BaseModel):
+    anahtar: str = ""          # boş: değişmez
+    acik: bool | None = None
+    seslendirme_otomatik: bool | None = None
+    sil: bool = False          # anahtarı sil
+
+
+@app.get("/api/yz")
+def yz_durum():
+    return yz.ozet()
+
+
+@app.post("/api/yz")
+def yz_ayar(a: YzAyar):
+    kw = {}
+    anahtar = re.sub(r"\s+", "", a.anahtar or "")   # kopyalarken araya giren boşluk/satır sonu
+    if anahtar:
+        if not re.fullmatch(r"[A-Za-z0-9_.\-]{20,200}", anahtar):
+            raise HTTPException(400, f"Bu bir Google API anahtarına benzemiyor ({len(anahtar)} karakter)")
+        kw["anahtar"] = anahtar
+    if a.sil:
+        kw["anahtar"] = ""
+    if a.acik is not None:
+        kw["acik"] = a.acik
+    if a.seslendirme_otomatik is not None:
+        kw["seslendirme_otomatik"] = a.seslendirme_otomatik
+    yz.ayar_yaz(**kw)
+    return yz.ozet()
+
+
+@app.post("/api/yz/dene")
+def yz_dene():
+    if not yz.ayarlar().get("anahtar"):
+        raise HTTPException(400, "Anahtar kayıtlı değil")
+    return yz.dene()
+
+
+@app.post("/api/kitaplar/{kid}/denetim")
+def denetim_baslat(kid: str):
+    """Kitabı (yeniden) yapay zekâyla denetler; bitince Osmanlıca ve çıktılar yenilenir. Saklı cevaplar yeniden sorulmaz."""
+    kit = _kitap(kid)
+    if kit["kunye"].get("asil_dil") != "tr":
+        raise HTTPException(409, "Denetim yalnız Türkçe kitaplarda")
+    if not yz.ayarlar().get("anahtar") and not os.environ.get("STUDYO_YZ_SAHTE"):
+        raise HTTPException(400, "Önce Gemini anahtarını kaydet (Yapay zekâ ayarı)")
+    d = depo.durum_oku(kid)
+    if d.get("asama") not in ("hazır", "hata"):
+        raise HTTPException(409, "Kitabın işi sürüyor; bitince dene")
+    depo.is_ekle("denetim", kid, "elle")
+    return {"ok": True}
+
+
+@app.get("/api/kitaplar/{kid}/denetim_rapor")
+def denetim_raporu(kid: str):
+    yol = os.path.join(depo.klasor(kid), "denetim.txt")
+    if not os.path.exists(yol):
+        raise HTTPException(404, "Denetim raporu yok")
+    return Response(open(yol, encoding="utf-8").read(), media_type="text/plain; charset=utf-8")
 
 
 # ---------------- Okuma ve düzeltme ----------------

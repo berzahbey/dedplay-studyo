@@ -18,7 +18,7 @@ import unicodedata
 import requests
 
 from . import epub as EPUB
-from . import cikti, epubcheck, kaynak, katalog, openiti, osmanlica
+from . import cikti, epubcheck, kaynak, katalog, openiti, osmanlica, yz
 from . import kitap as K
 
 VERI = os.environ.get("DATA_DIR", "/data")
@@ -86,7 +86,7 @@ def liste():
         d = durum_oku(kid)
         out.append({"kimlik": kid, **{k: d.get(k) for k in ("baslik", "baslik_asil", "yazar", "asama", "hata", "uyari", "guncellendi",
                                                             "cikti", "cikti_uyari", "studyo", "studyo_uyari",
-                                                            "eklendi", "epublar")}})
+                                                            "eklendi", "epublar", "denetim")}})
     return sorted(out, key=lambda x: -(x.get("eklendi") or 0))
 
 
@@ -202,6 +202,10 @@ def _dosya_ekle(kid, yol):
             if onceki["kunye"].get(alan, {}).get("elle"):
                 kit["kunye"][alan] = onceki["kunye"][alan]
     K.kaydet(kit, eski)  # Osmanlıca sonra, ayrı iş (önce kitabın kendi dilindeki EPUB'u hazır olur)
+    try:   # 0.5.53: yeni metin: yapay zekâ denetimi bunun üzerinden yeniden yapılır (saklı cevaplarla)
+        os.remove(os.path.join(klasor(kid), "kitap.denetimsiz.json"))
+    except OSError:
+        pass
 
 
 def _osmanlica(kid, zorla=False):
@@ -215,12 +219,16 @@ def _osmanlica(kid, zorla=False):
         durum_yaz(kid, uyari=f"Osmanlıca çevrilemedi ({type(e).__name__}: {str(e)[:120]}); sadece Türkçe üretildi")
 
 
-def _studyoya_zincirle(kid, guncelle=False, yalniz_var_olan=False):
+def _studyoya_zincirle(kid, guncelle=False, yalniz_var_olan=False, elle=False):
     """Tur 2/A: Osmanlıca ve EPUB'lar bitince Türkçe kitap kendiliğinden Stüdyo'ya gider (seslendirme ve öteki biçimler).
     Kitabın Stüdyo işi zaten varsa yeni iş açılmaz (düzeltmeden sonra yenileme tur 2/C). Osmanlıca çevrilemediyse
     gönderilmez: Stüdyo Osmanlıcayı ikinci kez çevirmesin; 'Osmanlıcayı yeniden çevir' başarılı olunca gider."""
     kit = K.yukle(kitap_yolu(kid))
     if kit["kunye"].get("asil_dil") != "tr" or "tr" not in K.diller(kit):
+        return
+    if not elle and not yz.ayarlar().get("seslendirme_otomatik", False):
+        # 0.5.53 (Zahir, 28 Ekim): bilinen hatalar düzelene kadar seslendirme kendiliğinden başlamaz; Ayarlar'dan açılır
+        durum_yaz(kid, studyo_uyari="Seslendirme bekletiliyor (Yapay zekâ ayarlarında 'seslendirme kendiliğinden' kapalı).")
         return
     d = durum_oku(kid)
     if d.get("uyari"):
@@ -243,6 +251,101 @@ def _studyoya_zincirle(kid, guncelle=False, yalniz_var_olan=False):
     except Exception as e:
         traceback.print_exc()
         durum_yaz(kid, studyo_uyari=f"Seslendirmeye gönderilemedi: {type(e).__name__}: {str(e)[:150]}")
+
+
+# ======================= 0.5.53: yapay zekâ denetimi =======================
+_kuyruk_den = queue.Queue()
+DENETIM_SERIT = int(os.environ.get("STUDYO_DENETIM_SERIT", "3"))
+
+
+def denetim_iscisi():
+    while True:
+        tur, kid, arg, nesil = _kuyruk_den.get()
+        try:
+            with _kilit:
+                gecerli = nesil == _nesil.get(kid, 0)
+            if gecerli and os.path.exists(kitap_yolu(kid)):
+                sonra = _denetim(kid, arg)
+                if sonra and kid not in _silinecek:
+                    is_ekle(*sonra)
+        except IsIptal:
+            pass
+        except Exception:
+            traceback.print_exc()
+        finally:
+            _kuyruk_den.task_done()
+
+
+def _kitap_ozu(yol):
+    import hashlib
+    try:
+        with open(yol, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def _denetim(kid, arg=None):
+    """Kitabın Türkçesini yapay zekâyla denetler (kutuphane/denetim.py). Okunmaz parçalar blokta ses_yok olur (metin değişmez),
+    kelime düzeltmeleri metne uygulanır. Her zaman denetimsiz hâlin (kitap.denetimsiz.json) üzerinden: yeniden denetimde işaretler
+    yinelenmez, saklı cevaplarla hızlıdır. Bitince Osmanlıca (düzeltilmiş kelimelerle) ve çıktılar. Dönen: sonraki iş."""
+    from . import denetim as D
+    yol, ham = kitap_yolu(kid), os.path.join(klasor(kid), "kitap.denetimsiz.json")
+    with kitap_kilidi(kid):
+        if not os.path.exists(ham):
+            shutil.copy2(yol, ham)
+        oz = _kitap_ozu(yol)
+        kit = K.yukle(ham)
+    if kit["kunye"].get("asil_dil") != "tr":
+        return None
+    ilerleme = lambda m: durum_asama(kid, m)
+    durum_asama(kid, "Yapay zekâ denetimi başlıyor")
+    # kitapta zaten bulunan okunmaz işaretleri (Hazırlık'ın EPUB'u) metne geri konur: görevler onları yeniden sormaz
+    for b in kit["bloklar"]:
+        sy = (b.get("ses_yok") or {}).get("tr")
+        if sy and b["metin"].get("tr"):
+            b["metin"]["tr"] = K.ses_yok_isaretle(b["metin"]["tr"], sy)
+    dn = D.Denetci(klasor(kid), ilerleme=ilerleme)
+    try:
+        dn.calistir(kit)
+    except yz.GunlukSinir:
+        ne = yz.sifirlanma()
+        saat = time.strftime("%H:%M", time.localtime(ne))
+        durum_yaz(kid, asama=f"Yapay zekâ: Google'ın günlük ücretsiz sınırı doldu; {saat}'de kaldığı yerden sürecek",
+                  denetim={"durum": "bekliyor", "devam": int(ne)})
+        threading.Timer(max(60, ne - time.time()), lambda: is_ekle("denetim", kid, arg)).start()
+        return None
+    except IsIptal:
+        raise
+    except Exception as e:   # denetim yapılamadı: kitap beklemez (Osmanlıca ve çıktılar denetimsiz sürer)
+        traceback.print_exc()
+        durum_yaz(kid, denetim={"durum": "hata", "hata": f"{type(e).__name__}: {str(e)[:200]}", "tarih": int(time.time())})
+        return ("osmanlica", kid)
+    for b in kit["bloklar"]:      # işaretler -> ses_yok (metin işaretsiz)
+        t = b["metin"].get("tr")
+        if t and (K.SES_AC in t or K.SES_KAPA in t):
+            t, sy = K.ses_yok_ayir(t)
+            b["metin"]["tr"] = t
+            if sy:
+                b.setdefault("ses_yok", {})["tr"] = sy
+            else:
+                (b.get("ses_yok") or {}).pop("tr", None)
+    for n in (kit.get("dipnotlar") or {}).values():
+        if isinstance(n.get("metin"), dict) and n["metin"].get("tr"):
+            n["metin"]["tr"] = K.ses_yok_ayir(n["metin"]["tr"])[0]
+    m = dn.model
+    ozet = dn.ozet()
+    okunmaz = sum(len((b.get("ses_yok") or {}).get("tr", [])) for b in kit["bloklar"])
+    rapor = dn.rapor_metni(kit["kunye"]["baslik"].get("tr") or kid, [f"okunmaz işaretli parça: {okunmaz}"])
+    with kitap_kilidi(kid):
+        if _kitap_ozu(yol) != oz:   # bu sırada kitap değişti (düzeltme ya da yeniden işleme): denetim yeniden (saklı cevaplarla)
+            return ("denetim", kid, arg)
+        K.kaydet(kit, yol)
+    with open(os.path.join(klasor(kid), "denetim.txt"), "w", encoding="utf-8") as f:
+        f.write(rapor)
+    durum_yaz(kid, denetim={"durum": "hazir", "tarih": int(time.time()), "ozet": ozet, "okunmaz": okunmaz,
+                            "cagri": getattr(m, "sayac", {}).get("cagri", 0), "model": dict(getattr(m, "kullanilan", {}) or {})})
+    return ("osmanlica", kid)
 
 
 def durum_asama(kid, mesaj):
@@ -344,7 +447,8 @@ def _isle(tur, kid, arg):
             if tur == "dosya":
                 kit = K.yukle(kitap_yolu(kid))
                 if kit["kunye"].get("asil_dil") == "tr":
-                    is_ekle("osmanlica", kid, tur="epub")
+                    # 0.5.53: yapay zekâ açıksa önce denetim (düzeltilmiş kelimeler Osmanlıcaya da geçsin), sonra Osmanlıca
+                    is_ekle("denetim" if yz.acik() else "osmanlica", kid, tur="epub")
         except IsIptal:
             return
         except Exception as e:
@@ -362,15 +466,18 @@ def is_ekle(is_turu, kid, arg=None, **durum):
             _bekleyen_epub.add(kid)
     # 0.5.17: yazı işi söyler (Türkçe EPUB hazırken "sırada" yanıltıcıydı); işin türü yeniden başlatma için saklanır
     yazi = {"osmanlica": "Osmanlıca sırada", "epub": "EPUB sırada", "kunye": "EPUB sırada",
-            "osm_cikti": "Çıktılar sırada"}.get(is_turu, "sırada")
+            "osm_cikti": "Çıktılar sırada", "denetim": "Yapay zekâ denetimi sırada"}.get(is_turu, "sırada")
     durum_yaz(kid, asama=yazi, hata=None, is_turu=is_turu, is_arg=arg, **durum)
-    (_kuyruk_osm if is_turu == "osmanlica" else _kuyruk).put((is_turu, kid, arg, _nesil.get(kid, 0)))
+    kuyruk = _kuyruk_osm if is_turu == "osmanlica" else _kuyruk_den if is_turu == "denetim" else _kuyruk
+    kuyruk.put((is_turu, kid, arg, _nesil.get(kid, 0)))
 
 
 def baslat():
     threading.Thread(target=isci, daemon=True, name="kutuphane-hafif").start()
     threading.Thread(target=isci, args=(True,), daemon=True, name="kutuphane-agir").start()
     threading.Thread(target=isci, args=("osm",), daemon=True, name="kutuphane-osmanlica").start()
+    for n in range(DENETIM_SERIT):   # 0.5.53: yapay zekâ denetimi aynı anda 3 kitap (dakika sınırı yz'de ortak sayılır)
+        threading.Thread(target=denetim_iscisi, daemon=True, name=f"kutuphane-denetim-{n}").start()
     # 0.5.8: çeviri kaldırıldı; çeviri izleyicisi başlatılmaz
     # yeniden başlatmada yarım kalan işler kuyruğa geri alınır
     for k in liste():

@@ -85,6 +85,11 @@ details.fihrist summary { cursor: pointer; font: 600 1.05rem var(--serif); }
 .fihrist ol { list-style: none; margin: 8px 0 0; padding: 0; direction: rtl; }
 .fihrist li { font: 1.1rem/1.7 var(--arab); }
 .alt { display: flex; flex-wrap: wrap; gap: 10px; }
+details.yz { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--surface); }
+details.yz summary { cursor: pointer; font: 600 1rem var(--sans); }
+details.yz summary .meta { display: inline; font-weight: 400; }
+label.secim { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-size: .92rem; cursor: pointer; }
+label.secim input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
 @media (max-width: 640px) {
   .tabs { overflow-x: auto; } .tabs button { padding: 10px 9px; font-size: .95rem; }
   main { padding: 28px 16px 60px; } h1 { font-size: 1.9rem; } .mark { width: 52px; height: 52px; font-size: 2.1rem; }
@@ -104,6 +109,22 @@ details.fihrist summary { cursor: pointer; font: 600 1.05rem var(--serif); }
     </div>
   </header>
   <div class="services" id="servisler" aria-live="polite"></div>
+
+  <details class="yz" id="yzKutu">
+    <summary>Yapay zekâ denetimi (Google Gemini) <span class="meta" id="yzOzet"></span></summary>
+    <p class="not">Türkçe kitap işlenince yapay zekâ kaynak parantezlerini, metne karışmış dipnot ve kaynak satırlarını, resim ve gazete
+      kupürü yazılarını seslendirmede okunmaz yapar, OCR'ın bozduğu kelimeleri düzeltir; sonra Osmanlıca ve çıktılar gelir. Denetlenen
+      cümle parçaları Google'a gider (ücretsiz katman: günlük sınır dolunca ertesi gün kaldığı yerden sürer).</p>
+    <div class="yukle">
+      <input type="text" id="yzAnahtar" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore
+        style="-webkit-text-security:disc;max-width:340px" placeholder="Gemini API anahtarını yapıştır" aria-label="Gemini API anahtarı">
+      <button class="btn" type="button" id="yzKaydet">Kaydet</button>
+      <button class="btn ghost" type="button" id="yzDene">Anahtarı dene</button>
+      <span class="not" id="yzDurum" aria-live="polite"></span>
+    </div>
+    <label class="secim"><input type="checkbox" id="yzAcik"> Yeni kitaplarda denetim kendiliğinden yapılsın</label>
+    <label class="secim"><input type="checkbox" id="yzSes"> Seslendirme kendiliğinden başlasın (kapalıyken kitaplar seslendirmede bekler; "Seslendirmeye gönder" ile tek tek gönderilir)</label>
+  </details>
 
   <div class="tabs" role="tablist">
     <button role="tab" id="t-kitaplar" aria-selected="true" aria-controls="p-kitaplar">Kitaplarım</button>
@@ -211,6 +232,29 @@ async function servisler() {
     kutu.append(E("span", {}, "sürüm " + d.surum));
   } catch (e) { $("#servisler").textContent = "Durum alınamadı: " + e.message; }
 }
+
+// ---- 0.5.53: yapay zekâ denetimi ayarı
+function yzGoster(d) {
+  $("#yzOzet").textContent = d.anahtar_var ? `· anahtar …${d.anahtar_son} · ${d.acik ? "açık" : "kapalı"}` +
+    ` · bugün ${Object.values(d.istek || {}).reduce((a, b) => a + b, 0)} istek` + (d.tukenen?.length ? ` · sınırı dolan: ${d.tukenen.join(", ")}` : "")
+    : "· anahtar kayıtlı değil";
+  $("#yzAcik").checked = !!d.acik; $("#yzAcik").disabled = !d.anahtar_var;
+  $("#yzSes").checked = !!d.seslendirme_otomatik;
+}
+async function yzYukle() { try { yzGoster(await api("/api/yz")); } catch (e) { $("#yzOzet").textContent = "· " + e.message; } }
+async function yzYaz(govde) {
+  try { yzGoster(await api("/api/yz", { method: "POST", body: JSON.stringify(govde) })); $("#yzDurum").textContent = "Kaydedildi"; }
+  catch (e) { $("#yzDurum").textContent = e.message; }
+}
+$("#yzKaydet").onclick = async () => { await yzYaz({ anahtar: $("#yzAnahtar").value, acik: true }); $("#yzAnahtar").value = ""; };
+$("#yzAcik").onchange = () => yzYaz({ acik: $("#yzAcik").checked });
+$("#yzSes").onchange = () => yzYaz({ seslendirme_otomatik: $("#yzSes").checked });
+$("#yzDene").onclick = async () => {
+  $("#yzDurum").textContent = "Deneniyor…";
+  try { const r = await api("/api/yz/dene", { method: "POST" }); $("#yzDurum").textContent = (r.ok ? "✓ " : "✗ ") + r.mesaj + (r.model ? ` (${r.model})` : ""); }
+  catch (e) { $("#yzDurum").textContent = e.message; }
+};
+yzYukle();
 
 // ---- OpenITI arama
 $("#araform").onsubmit = async ev => {
@@ -398,6 +442,25 @@ async function ayrinti(kid, li) {
   if (d.durum.cikti?.length) epKutu.append(E("p", { class: "meta" }, E("span", {}, "Kitaplar klasöründe: " + d.durum.cikti.join(", "))));
   else if (d.durum.cikti_uyari) epKutu.append(E("p", { class: "uyari" }, d.durum.cikti_uyari));
   kutu.append(epKutu);
+  if (d.kunye?.asil_dil === "tr" && d.diller?.includes("tr")) {   // 0.5.53: yapay zekâ denetimi
+    const dn = d.durum.denetim || {};
+    const oz = dn.ozet || {};
+    const say = g => (oz[g] || {}).kabul || 0;
+    const dbtn = E("button", { class: "btn ghost", type: "button" }, dn.durum === "hazir" ? "Yeniden denetle" : "Yapay zekâ ile denetle");
+    dbtn.onclick = async () => { dbtn.disabled = true;
+      try { await api(`/api/kitaplar/${encodeURIComponent(kid)}/denetim`, { method: "POST" }); kitaplar(); }
+      catch (e) { alert(e.message); dbtn.disabled = false; } };
+    const yazi = dn.durum === "hazir"
+      ? `Denetlendi (${new Date(dn.tarih * 1000).toLocaleString("tr-TR")}): seslendirmede okunmaz ${dn.okunmaz || 0} parça ` +
+        `(kaynak parantezi ${say("parantez")}, dipnot numarası ${say("sayi")}, kaynak satırı ${say("satir")}, resim/kupür yazısı ${say("resim")}), ` +
+        `kelime düzeltmesi ${say("kelime")} · ${dn.cagri || 0} istek`
+      : dn.durum === "bekliyor" ? "Google'ın günlük sınırı doldu; ertesi gün kaldığı yerden sürecek."
+      : dn.durum === "hata" ? "Denetim yapılamadı: " + (dn.hata || "") : "Henüz denetlenmedi.";
+    kutu.append(E("div", {}, E("h3", {}, "Yapay zekâ denetimi"),
+      E("p", { class: dn.durum === "hata" ? "uyari" : "meta" }, yazi),
+      E("div", { class: "alt" }, dbtn,
+        dn.durum === "hazir" ? E("a", { class: "btn ghost", href: `/api/kitaplar/${encodeURIComponent(kid)}/denetim_rapor`, target: "_blank" }, "Denetim raporu") : null)));
+  }
   if (ep.length && !d.diller?.includes("tr")) {
     kutu.append(E("div", {}, E("h3", {}, "Seslendirme ve öteki biçimler"),
       E("p", { class: "meta" }, "Türkçe olmayan kitap (OpenITI vb.) yalnız kendi dilinde EPUB olarak kalır: çeviri, Osmanlıca ve seslendirme yapılmaz.")));
@@ -405,11 +468,18 @@ async function ayrinti(kid, li) {
   if (ep.length && d.diller?.includes("tr")) {
     // tur 2/D: seslendirme kendiliğinden (ekleyince ve her düzeltmeden sonra); elle gönderme düğmesi yok
     const st = d.durum.studyo, j = st ? isler[st.is] : null;
-    const durum = E("p", { class: "meta" }, j ? sesYazisi(j) || "" : "Osmanlıca bitince seslendirmeye gidecek.");
+    const bekliyor = (d.durum.studyo_uyari || "").startsWith("Seslendirme bekletiliyor");
+    const durum = E("p", { class: "meta" }, j ? sesYazisi(j) || "" : bekliyor ? "" : "Osmanlıca bitince seslendirmeye gidecek.");
     const ad = j && (j.saved || j.book_name);
     kutu.append(E("div", {}, E("h3", {}, "Seslendirme ve öteki biçimler"),
       E("p", { class: "meta" }, "Kitap kendiliğinden seslendirilir; okuma ekranında düzeltme yapınca yalnız değişen bölümün sesi ve bütün biçimler yenilenir (son düzeltmeden 2 dakika sonra)."),
       d.durum.studyo_uyari ? E("p", { class: "uyari" }, d.durum.studyo_uyari) : null, durum,
+      !j && bekliyor ? (() => {
+        const g = E("button", { class: "btn ghost", type: "button" }, "Seslendirmeye gönder");
+        g.onclick = async () => { g.disabled = true;
+          try { await api(`/api/kitaplar/${encodeURIComponent(kid)}/studyo`, { method: "POST" }); kitaplar(); }
+          catch (e) { alert(e.message); g.disabled = false; } };
+        return E("div", { class: "alt" }, g); })() : null,
       ad ? E("p", { class: "meta" }, `Çıktılar: /media/ZimaOS-HD/dedplay → EPUB, PDF, DOCX, TXT, HTML (Türkçe, Osmanlıca, Türkçe-Osmanlıca), MP3, M4B · dosya adı: "${ad}"`) : null,
       j && j.ok_state === "bitti" ? sesCalar(j.id) : null));
   }

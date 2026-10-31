@@ -136,6 +136,15 @@ def _bekle_dakika(model):
         time.sleep(max(0.5, bekle))
 
 
+def kullanilamaz_ekle(model):
+    """0.5.56: modeli kalıcı olarak atla (ayarda "kullanilamaz"); model listesi önbelleği silinir."""
+    with _kilit:
+        yok = list(ayarlar().get("kullanilamaz") or [])
+    if model not in yok:
+        ayar_yaz(kullanilamaz=yok + [model])
+    _model_onbellek.update(zaman=0, liste=[])
+
+
 # ---------------------------------------------------------------- Gemini
 def _istek(yol, govde=None, anahtar=None, zaman=120):
     import requests
@@ -161,7 +170,8 @@ def modeller(anahtar=None):
         g = re.fullmatch(r"gemini-(\d+(?:\.\d+)?)-flash-lite", ad)
         if g and "generateContent" in (m.get("supportedGenerationMethods") or []):
             out.append((float(g.group(1)), ad))
-    liste = [ad for _, ad in sorted(out, reverse=True)]
+    yok = set(ayarlar().get("kullanilamaz") or [])   # 0.5.56: Google'ın kapattığı modeller (404 "no longer available")
+    liste = [ad for _, ad in sorted(out, reverse=True) if ad not in yok]
     if not liste:
         raise RuntimeError("Hesapta kullanılabilir Gemini Flash-Lite modeli bulunamadı")
     if not anahtar:
@@ -256,6 +266,13 @@ class Gemini:
                 continue
             if r.status_code in (500, 502, 503, 504):
                 time.sleep(10 * (deneme + 1))
+                continue
+            if r.status_code == 404 or (r.status_code == 400 and "no longer available" in r.text):
+                # 0.5.56: model listede görünüyor ama hesaba kapalı (Tahrif 3, 31 Ekim: gemini-2.5-flash-lite "no longer available
+                # to new users"): kalıcı olarak atlanır, sıradaki modele geçilir (yoksa GunlukSinir: denetim ertesi gün sürer)
+                kullanilamaz_ekle(model)
+                self._ad = None
+                self.ilerleme(f"{model} kullanılamıyor (Google kapatmış); sıradaki modele geçiliyor")
                 continue
             raise RuntimeError(f"Gemini hatası {r.status_code}: {r.text[:300]}")
         raise RuntimeError("Gemini cevap vermedi (10 deneme)")

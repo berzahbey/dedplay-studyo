@@ -285,6 +285,10 @@ def _kitap_ozu(yol):
         return None
 
 
+DENETIM_GECICI_BEKLE = int(os.environ.get("STUDYO_DENETIM_BEKLE", "1800"))   # 0.5.57: Gemini cevap vermezse bekleme (sn)
+DENETIM_GECICI_DENEME = 8
+
+
 def _denetim(kid, arg=None):
     """Kitabın Türkçesini yapay zekâyla denetler (kutuphane/denetim.py). Okunmaz parçalar blokta ses_yok olur (metin değişmez),
     kelime düzeltmeleri metne uygulanır. Her zaman denetimsiz hâlin (kitap.denetimsiz.json) üzerinden: yeniden denetimde işaretler
@@ -315,6 +319,18 @@ def _denetim(kid, arg=None):
                   denetim={"durum": "bekliyor", "devam": int(ne)})
         threading.Timer(max(60, ne - time.time()), lambda: is_ekle("denetim", kid, arg)).start()
         return None
+    except yz.GeciciHata as e:   # 0.5.57: Gemini şu an cevap vermiyor: kitap denetimsiz sürmez, 30 dk sonra yeniden (en çok 8 kez)
+        sayi = int(((durum_oku(kid).get("denetim") or {}).get("gecici") or 0)) + 1
+        if sayi <= DENETIM_GECICI_DENEME:
+            ne = time.time() + DENETIM_GECICI_BEKLE
+            saat = time.strftime("%H:%M", time.localtime(ne))
+            durum_yaz(kid, asama=f"Yapay zekâ: Gemini şu an cevap vermiyor; {saat}'de yeniden denenecek ({sayi}/{DENETIM_GECICI_DENEME})",
+                      denetim={"durum": "bekliyor", "devam": int(ne), "gecici": sayi})
+            threading.Timer(DENETIM_GECICI_BEKLE, lambda: is_ekle("denetim", kid, arg)).start()
+            return None
+        traceback.print_exc()
+        durum_yaz(kid, denetim={"durum": "hata", "hata": f"{type(e).__name__}: {str(e)[:200]}", "tarih": int(time.time())})
+        return ("osmanlica", kid)
     except IsIptal:
         raise
     except Exception as e:   # denetim yapılamadı: kitap beklemez (Osmanlıca ve çıktılar denetimsiz sürer)

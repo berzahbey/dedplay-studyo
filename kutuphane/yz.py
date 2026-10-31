@@ -30,6 +30,10 @@ class GunlukSinir(Exception):
     """Bütün modellerin günlük ücretsiz sınırı doldu."""
 
 
+class GeciciHata(RuntimeError):
+    """0.5.57: Gemini şu an cevap vermiyor (zaman aşımı, bağlantı, 5xx; 10 denemede): denetim bir süre sonra yeniden denenir."""
+
+
 # ---------------------------------------------------------------- ayar
 def ayarlar():
     try:
@@ -243,7 +247,17 @@ class Gemini:
         for deneme in range(10):
             model = self.ad[7:]
             _bekle_dakika(model)
-            r = _istek(f"models/{model}:generateContent", govde)
+            try:
+                r = _istek(f"models/{model}:generateContent", govde, zaman=240)
+            except Exception as e:      # 0.5.57: zaman aşımı/bağlantı hatası denemeyi bitirmez (31 Ekim: 18 kitapta ReadTimeout)
+                import requests
+                if not isinstance(e, requests.RequestException):
+                    raise
+                _say(model)
+                self.ilerleme(f"Gemini cevap vermedi ({type(e).__name__}); yeniden deneniyor")
+                time.sleep(15 * (deneme + 1))
+                self.sayac["bekleme"] += 15 * (deneme + 1)
+                continue
             _say(model)
             if r.status_code == 200:
                 d = r.json()
@@ -275,7 +289,7 @@ class Gemini:
                 self.ilerleme(f"{model} kullanılamıyor (Google kapatmış); sıradaki modele geçiliyor")
                 continue
             raise RuntimeError(f"Gemini hatası {r.status_code}: {r.text[:300]}")
-        raise RuntimeError("Gemini cevap vermedi (10 deneme)")
+        raise GeciciHata("Gemini cevap vermedi (10 deneme)")
 
 
 def dene(anahtar=None):

@@ -1783,7 +1783,7 @@ def _duzen_bolgeleri(yol, sayfalar, bilgi, ilerleme=None):
 _RESIM = ("Picture", "Figure", "Handwriting")   # 0.5.51: el yazısı belge (Tahrif 1 s.393: mektup) de resimdir
 
 
-def _resim_satirlari(rows, bolgeler, w):
+def _resim_satirlari(rows, bolgeler, w, govde_boy=None):
     """0.5.51: resim/şekil bölgesinin içindeki satırlar ve resmin altındaki kısa yazı (sıralar). Bölge gövde metnine benziyorsa
     (içindeki satırların çoğu tam genişlikte, en az 6 kelimelik düz satır) model yanılmış sayılır, dokunulmaz."""
     resimler = [b for b in bolgeler if b[0] in _RESIM]
@@ -1808,7 +1808,65 @@ def _resim_satirlari(rows, bolgeler, w):
         ic = [k for k, r in enumerate(rows) if icinde(r, b)]
         if ic and len(ic) <= 2 and sum(rows[k]["n"] for k in ic) <= 15:
             sil.update(ic)
+    if govde_boy:
+        sil |= _kupur_satirlari(rows, bolgeler, w, govde_boy, icinde, sil)
     return sil
+
+
+# 0.5.55: resim olarak konmuş gazete kupürü (Tahrif 3 son sayfa: "ZAMAN" logosu, "Türkiye, diyalog merkezi olma şansını yakaladı" başlığı,
+# küçük puntolu haber metni "Zafer Özcan | İstanbul …"). Sayfa düzeni modeli kupürün yazılarını Text/SectionHeader sayar, Picture değil.
+# Kural (yalnız resmi olan sayfada): (1) küçük yazı: resme bitişik, dar (sayfa eninin %60'ından az) bir bölgenin satırları kitabın gövde
+# satır boyunun %65'inden küçükse; (2) arada kalan: üstünde ve altında resim (ya da çıkan bölge) olan başlık, ya da en çok 2 satırlık ya da
+# küçük yazılı bölge; (2) yalnız sayfada (1) varsa. Gövde boyunda 3+ satırlık paragraf ve Footnote/PageHeader/PageFooter bölgeleri hiç çıkmaz.
+_KUPUR_DISI = ("Footnote", "PageHeader", "PageFooter")
+
+
+def _kupur_satirlari(rows, bolgeler, w, govde_boy, icinde, sil):
+    resim = [b for b in bolgeler if b[0] in _RESIM]
+    yazi = [b for b in bolgeler if b[0] not in _RESIM and b[0] not in _KUPUR_DISI]
+    if not resim or not yazi:
+        return set()
+    H = max([b[4] for b in bolgeler] + [r["bot"] for r in rows])
+    pay = 0.03 * H
+    satir = {id(b): [k for k, r in enumerate(rows) if icinde(r, b) and k not in sil] for b in yazi}
+    boy = lambda ks: sorted(rows[k]["bot"] - rows[k]["top"] for k in ks)[len(ks) // 2]
+
+    def kucuk(b):
+        ks = satir[id(b)]
+        return bool(ks) and boy(ks) < 0.65 * govde_boy
+
+    def bitisik(a, b):
+        return a[1] - pay <= b[3] and b[1] - pay <= a[3] and a[2] - pay <= b[4] and b[2] - pay <= a[4]
+
+    def ust_alt(b, kume):
+        """b'nin hemen üstündeki ve altındaki bölge (x'te örtüşen) kümede mi."""
+        def ortusur(a):
+            return min(a[3], b[3]) - max(a[1], b[1]) >= 0.3 * min(a[3] - a[1], b[3] - b[1])
+        ust = [a for a in bolgeler if a is not b and ortusur(a) and a[4] <= b[2] + pay and b[2] - a[4] <= 2 * pay]
+        alt = [a for a in bolgeler if a is not b and ortusur(a) and a[2] >= b[4] - pay and a[2] - b[4] <= 2 * pay]
+        return any(id(a) in kume for a in ust) and any(id(a) in kume for a in alt)
+
+    cik = {id(b) for b in resim}
+    for b in yazi:
+        if kucuk(b) and b[3] - b[1] < 0.6 * w and any(bitisik(b, r) for r in resim):
+            cik.add(id(b))
+    if len(cik) == len(resim):
+        return set()   # küçük yazı yoksa kupür değil: resimler arasındaki bölüm başlığı ("İKİNCİ BÖLÜM", Tahrif 3 s.289) kalır
+    degisti = True
+    while degisti:
+        degisti = False
+        for b in yazi:
+            ks = satir[id(b)]
+            if id(b) in cik or not ks:
+                continue
+            uygun = b[0] in ("SectionHeader", "Title") or len(ks) <= 2 or kucuk(b)
+            if uygun and ust_alt(b, cik):
+                cik.add(id(b)); degisti = True
+    out = set()
+    for b in yazi:
+        if id(b) in cik:
+            out.update(satir[id(b)])
+    return out
 
 
 # ======================= 0.5.48: dipnot çizgisi (konumla) =======================
@@ -2864,6 +2922,12 @@ def icindekiler_fihristi(girdiler, nolar, kalan, paras_of):
     return imler
 
 
+def _govde_satir_boyu(sayfalar):
+    """0.5.55: OCR'lı sayfalarda en az 6 kelimelik satırların boy ortancası (kitabın gövde yazısı)."""
+    b = sorted(r["bot"] - r["top"] for rows, _, _, o in sayfalar if o for r in rows if r.get("n", 0) >= 6)
+    return b[len(b) // 2] if len(b) >= 50 else None
+
+
 def pdf_oku(yol, ilerleme=None):
     """PDF -> (öğeler, dipnotlar, bilgi). öğe: {'tur': 'baslik'|'p', 'metin', 'boy'} ; metinde sayfa/dipnot işaretleri."""
     _gerekli()
@@ -2871,9 +2935,10 @@ def pdf_oku(yol, ilerleme=None):
     duzen = _duzen_bolgeleri(yol, sayfalar, bilgi, ilerleme)   # 0.5.51: resim içindeki yazılar metne girmez
     if duzen:
         say = 0
+        govde_boy = _govde_satir_boyu(sayfalar)   # 0.5.55: gazete kupürünün küçük yazısı için ölçü
         for i, bol in duzen.items():
             rows, w, h, o = sayfalar[i]
-            sil = _resim_satirlari(rows, bol, w)
+            sil = _resim_satirlari(rows, bol, w, govde_boy)
             if sil:
                 say += len(sil)
                 R.silindi("resim içi yazı", f"PDF s.{i + 1}: " + " / ".join(rows[k]["text"] for k in sorted(sil))[:300])

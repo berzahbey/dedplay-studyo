@@ -50,8 +50,25 @@ YABANCI = re.compile(r"\b(?:the|of|and|for|in|with|des|die|das|und|von|journal|r
 _IMLA = str.maketrans("bpdtgkâîû", "ppttkkaiu")   # 0.5.1: c/ç ve g/ğ OCR farkıdır (imlâ değil)
 
 
+# 0.5.58: eski ek yazımı da yazarın imlâsıdır: "bekliyerek/bekleyerek", "başlıyacak/başlayacak", "bilmiyen/bilmeyen",
+# "çalmağa/çalmaya" (y kaynaştırmasında ünlü uyumu ve -mağa/-meğe yönelme eki)
+_ESKI_EK = ((re.compile(r"[ıiuü]y([ae])"), r"\1y\1"), (re.compile(r"m([ae])ğ([ae])"), r"m\1y\2"))
+
+
+def _ek_yeni(k):
+    for rx, yeni in _ESKI_EK:
+        k = rx.sub(yeni, k)
+    return k
+
+
 def _imla(w):
     return _kucuk(w).translate(_IMLA)
+
+
+def _eski_yazim(w, d):
+    """w -> d yalnız imlâ farkı mı (yön: eski yazımlı w modern d'ye çevrilmesin; "kayamet" -> "kıyamet" OCR düzeltmesi kalır)."""
+    a, b = _imla(w), _imla(d)
+    return a == b or (_ek_yeni(a) != a and _ek_yeni(a) == _ek_yeni(b))
 
 
 # 0.5.0: olumsuzluk eki eklenip çıkarılmaz ("liliyorlar" -> "bilmiyorlar" anlamı tersine çevirir)
@@ -277,6 +294,8 @@ class Denetci:
             for m in rx.finditer(t):
                 if _okunmaz_icinde(t, m.start()) or t[max(0, m.start() - 2):m.start()].endswith(("{{", "n0")):
                     continue
+                if re.search(r"\d\s*[xX×]\s*$", t[max(0, m.start() - 4):m.start()]):   # 0.5.58: "16x19 cm" ölçüdür
+                    continue
                 n = int(m.group(2))
                 if not 1 <= n <= not_sayisi + 100:
                     continue
@@ -422,7 +441,8 @@ class Denetci:
         self.ilerleme("Denetim (kelime): adaylar seçiliyor")
         adaylar = [w for w in say if say[w] <= 3 and len(w) >= 3 and not gecerli(w) and not re.search(r"[؀-ۿ]", w)
                    and len(YABANCI.findall(" ".join(ornek[w]))) < 2      # 0.4.4: yabancı dilde alıntı sorulmaz
-                   and not re.search(r"\w-\s*$", ornek[w][0])]           # "al- mişlardır": satır sonu bölünmesi
+                   and not re.search(r"\w-\s*$", ornek[w][0])           # "al- mişlardır": satır sonu bölünmesi
+                   and not re.match(r"-[^\W\d_]", ornek[w][1])]           # 0.5.58: "olabildigi-ni": tireyle bölünmüş kelime
         ogeler = [(_anahtar(w), f"«{w}» — {ornek[w][0]}{w}{ornek[w][1]}".replace("\n", " ")) for w in adaylar]
         cevap = self._sor("kelime", ISTEM_KELIME, ogeler, 20, "hata", "kelime")
         duzelt = {}
@@ -438,7 +458,7 @@ class Denetci:
             neden = None
             if uz > 2 or uz > max(1, len(w) // 4) or ham > max(2, len(w) // 2):
                 neden = f"çok farklı ({uz} harf)"
-            elif _imla(w) == _imla(d):
+            elif _eski_yazim(w, d):
                 neden = "eski yazım farkı (yazarın imlâsı korunur)"
             elif bool(OLUMSUZ.search(_imsiz(w))) != bool(OLUMSUZ.search(_imsiz(d))):
                 neden = "olumsuzluk eki değişiyor (anlam tersine döner)"
@@ -502,7 +522,9 @@ class Denetci:
             b["metin"]["tr"] = t
         # kelime düzeltmeleri (tam kelime, büyük/küçük harf aynen)
         if duzelt:
-            rx = re.compile(r"(?<![\w])(" + "|".join(re.escape(w) for w in sorted(duzelt, key=len, reverse=True)) + r")(?![\w])")
+            # 0.5.58: tireyle bitişik parça ("olabildigi-ni", "kitab-ı") değişmez: "olabildiğini-ni" olmasın
+            rx = re.compile(r"(?<![\w])(?<![^\W\d_]-)(" + "|".join(re.escape(w) for w in sorted(duzelt, key=len, reverse=True))
+                            + r")(?![\w])(?!-[^\W\d_])")
             for b in bloklar:
                 b["metin"]["tr"] = rx.sub(lambda m: duzelt[m.group(1)], b["metin"]["tr"])
             for v in dipnotlar.values():

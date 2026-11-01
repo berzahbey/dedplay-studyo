@@ -270,8 +270,14 @@ def denetim_iscisi():
                     is_ekle(*sonra)
         except IsIptal:
             pass
-        except Exception:
+        except Exception as e:
             traceback.print_exc()
+            # 0.5.59: beklenmeyen hata kitabı eski aşama yazısıyla bırakmasın: hata görünür, "Yapay zekâ ile denetle" ile yeniden
+            try:
+                durum_yaz(kid, asama="hata", hata=f"Denetim: {type(e).__name__}: {str(e)[:200]}",
+                          denetim={"durum": "hata", "hata": f"{type(e).__name__}: {str(e)[:200]}", "tarih": int(time.time())})
+            except Exception:
+                traceback.print_exc()
         finally:
             _kuyruk_den.task_done()
 

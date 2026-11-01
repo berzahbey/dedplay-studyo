@@ -544,8 +544,19 @@ class Denetci:
         """Rapor: başlık + model satırı + ust (çağıranın satırları) + görev görev kabul/ret listesi."""
         m = self.model if self._model is not None else None
         kullanilan = dict(getattr(m, "kullanilan", {}) or {})
+        # 0.5.59: bütün cevaplar saklıysa model adı sorulmaz (sınır doluyken .ad GunlukSinir atıyordu: denetim bitmiş kitap
+        # "adaylar seçiliyor"da kalıyordu)
+        if m is None:
+            model_ad = "-"
+        elif not kullanilan and not getattr(m, "sayac", {}).get("cagri", 0):
+            model_ad = "saklı cevaplar (istek gitmedi)"
+        else:
+            try:
+                model_ad = m.ad
+            except Exception:
+                model_ad = "-"
         s = [f"Dedplay — yapay zekâ denetimi: {ad}",
-             f"model: {getattr(m, 'ad', '-')}" + (f" (kullanılan: {kullanilan})" if kullanilan else "")
+             f"model: {model_ad}" + (f" (kullanılan: {kullanilan})" if kullanilan else "")
              + f"; çağrı {getattr(m, 'sayac', {}).get('cagri', 0)}, süre {self.sure}"] + list(ust) + [""]
         adlar = {"parantez": "Kaynak parantezleri (okunmaz)", "sayi": "Bağlanamamış dipnot numaraları (okunmaz)",
                  "satir": "Ana metne karışmış kaynak satırları (okunmaz)",

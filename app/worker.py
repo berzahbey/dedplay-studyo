@@ -108,7 +108,7 @@ def kisa_satir_sayilari(parts):
     import collections
     say = collections.Counter()
     for p in parts:
-        for x in (p.get("tr") or "").split("\n"):
+        for x in (p["tr"] or "").split("\n"):   # 0.5.64: p sqlite3.Row da olabilir (step_okuma: .get yok)
             if 0 < len(x.strip()) <= 120:
                 say[_duz(x)] += 1
     return say

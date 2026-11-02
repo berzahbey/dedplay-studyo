@@ -52,6 +52,8 @@ def parts_to_epub(parts, title, out_path):
         satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for x in p["tr"].split("\n")]  # ayet/madde no okunmaz
         satirlar = [ses_metni(x) for x in satirlar]  # 0.5.43: yazarın kaynak gösterimleri ("(Kehf, 110)", "(M. 54)", "(Müslim)") okunmaz
         satirlar = [x for x in satirlar if x.strip()]
+        if not satirlar:   # 0.5.60: sesi olmayan parça (hepsi okunmaz/kaynak): boş <body> ebooklib'de "Document is empty" hatası
+            continue
         # tur 2/C: parçanın ilk satırı (bölüm başlığı) <h1>: Kitap Okuma M4B bölüm adını buradan alır (Bolum_001 yerine)
         bas = f"<h1>{_html.escape(satirlar[0])}</h1>" if satirlar and len(satirlar[0]) <= 120 else ""
         govde = satirlar[1:] if bas else satirlar

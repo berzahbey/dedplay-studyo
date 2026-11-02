@@ -512,6 +512,21 @@ def baslat():
                 is_ekle(d["is_turu"], k["kimlik"], d.get("is_arg"))
             else:
                 is_ekle(d.get("tur", "epub"), k["kimlik"], d.get("kaynak_kimlik"))
+        _bekleyen_denetim(k)
+
+
+def _bekleyen_denetim(k):
+    """0.5.60: günlük sınır yüzünden bekleyen denetim yeniden başlatmada kaybolmasın (Timer bellekteydi). 2 Kasım: Tahrif 1-3
+    "bekliyor" kaldı; aşamaları sıradaki eski işlerle "hazır" olduğu için yukarıdaki geri alma onları görmedi."""
+    d = durum_oku(k["kimlik"])
+    den = d.get("denetim") or {}
+    if den.get("durum") != "bekliyor":
+        return
+    if k.get("asama") not in (None, "hazır", "hata") and d.get("is_turu") == "denetim":
+        return      # denetim işi zaten geri alındı
+    kid, arg = k["kimlik"], d.get("is_arg") if d.get("is_turu") == "denetim" else None
+    gecikme = max(5, int(den.get("devam") or 0) - time.time())
+    threading.Timer(gecikme, lambda: is_ekle("denetim", kid, arg)).start()
 
 
 def sil(kid):

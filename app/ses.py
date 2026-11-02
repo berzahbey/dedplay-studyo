@@ -79,6 +79,9 @@ def _parantez(m, S):
     ic = m.group(1) if m.group(1) is not None else m.group(2)
     if atif_mi(ic):
         return S
+    # 0.5.61: "(Ahm ed b. Hanbel, c. 3, s. 99, Kâmûsu'l-muhft, c. 2, s. 217)" (OCR boşluklu ad), "(Mesîh'e de bkz.)"
+    if len(re.findall(r"(?<![\w])[cs]\.\s?\d", ic)) >= 2 or re.search(r"(?<![\w])bkz\.?\s*$", ic.strip(), re.I):
+        return S
     parca = [p for p in re.split(r"\s*;\s*", ic)]
     if len(parca) > 1:
         kalan = [p for p in parca if not atif_mi(p)]
@@ -220,6 +223,37 @@ def harekesiz_arap_satiri(t):
     return len(_HAREKE.findall(t)) < 0.05 * len(ar)
 
 
+# ---------- 0.5.61: seste kalan OCR/dizgi artıkları (2 Kasım, bütün kitapların ses metni ölçümünden) ----------
+_BIR_SON = re.compile(r"(?<=[^\W\d_]{2})1(?=[\s.,;:!?\"'”’»)]|$)")          # "kazandım1 dersin": tırnak "1" okunmuş
+_BIR_ICI = re.compile(r"(?<=[^\W\d_])1(?=[a-zçğıöşüâîû])")                   # "A1manlar": l "1" okunmuş
+_BEKKER_ICI = re.compile(r"(?<=[^\W\d_])\s?1[0-4]\d\d[ab]\s?(?=[^\W\d_])")  # "söyle1395a diklerini" (Aristoteles sayfa no)
+_BEKKER = re.compile(r"(?<![\w])1[0-4]\d\d[ab](?![\w])")
+_KOSELI_TIRE = re.compile(r"(?<=[^\W\d_])-\s?\[[lIij1]?\d{1,3}[lIij1]?[\]jl]?\s?(?=[^\W\d_])")   # "hak-[i63j kindaki"
+_KOSELI_NO = re.compile(r"\s?\[[lIij1]?\d{1,3}[lIij1]?[\]jl]?(?![\w])")       # "[l6l]", "[161]"
+
+
+# 0.5.62 (Zahir, 2 Kasım dinleme): ses modeli "â"dan önceki l'yi ince okuyor: "Allâh" bozuk, "Allah" doğru. Yalnız Allah ve
+# türevleri (Abdullâh, Resûlullâh, Bismillâh, inşâallâh): "llâh" -> "llah". Öteki şapkalar (Teâlâ, lâzım) değişmez.
+_ALLAH = re.compile(r"([Ll][Ll])([âÂ][hH])")
+
+
+def dizin_satiri(t):
+    """Dizin satırı: "Cebrâil (Rûhü'l-Emin'e de bkz.): 369, 1172, 1632…" — sesle okunmaz."""
+    k = t.split()
+    sayi = [w for w in k if re.fullmatch(r"\d{1,5}[,.;…]*", w)]
+    return len(sayi) >= 5 and len(sayi) >= 0.6 * len(k)
+
+
+def _artiklar(t, S):
+    y = _KOSELI_TIRE.sub("", t)
+    y = _KOSELI_NO.sub(S, y)
+    y = _BEKKER_ICI.sub("", y)
+    y = _BEKKER.sub(S, y)
+    y = _BIR_ICI.sub("l", y)
+    y = _ALLAH.sub(lambda m: m.group(1) + ("AH" if m.group(2).isupper() else "ah"), y)   # 0.5.62
+    return _BIR_SON.sub("", y)
+
+
 def ses_metni(t):
     """Seslendirmeye giden bir satırdan kaynak gösterimlerini çıkarır. Kaynak gösterimi olmayan satır olduğu gibi kalır."""
     if not t:
@@ -227,6 +261,8 @@ def ses_metni(t):
     S = "\u0000"
     if harekesiz_arap_satiri(t.replace("\ue020", "").replace("\ue021", "")):
         return ""                        # 0.5.54
+    if dizin_satiri(t.replace("\ue020", "").replace("\ue021", "")):
+        return ""                        # 0.5.61
     if "\ue020" in t or "\ue021" in t:   # 0.5.52: Hazırlık'ın okunmaz işaretli parçası (kaynak, dipnot no, kaynak satırı) okunmaz
         t = re.sub("\ue020[^\ue021]*\ue021", S, t).replace("\ue020", "").replace("\ue021", "")
         y = ses_metni(t.replace(S, " \ue022 "))
@@ -234,6 +270,7 @@ def ses_metni(t):
         return re.sub(r"\s*\ue022[\s\ue022]*", " ", y).strip()
     # çıkan yerin işareti: yalnız orada boşluk/noktalama toplanır (öteki satırlar değişmez, sesi yeniden üretilmez)
     y = _arapca_ibareler(_ocr_artiklari(_ocr_artiklari(t, S), S), S)   # 0.5.48 (iki kez: tekrar silinince Arapça parça yeniden ölçülür)
+    y = _artiklar(y, S)                                                 # 0.5.61
     ar = y != t
     y = _PARANTEZ.sub(lambda m: _parantez(m, S), y)
     y = _ZINCIR.sub(lambda m: S if _zincir_mi(m.group(0)) else m.group(0), y)

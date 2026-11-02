@@ -113,10 +113,10 @@ dene("(no: 5) kalır", ses_metni("sayfa (no: 5)") == "sayfa (no: 5)")
 # 10) Latin harfli Arapça ibare: meali varsa okunmaz, yoksa "Arapça ibare"
 dene("ibare + yani meal: ibare okunmaz, meal okunur",
      ses_metni('er-Râsibî: "-Lâ hükme illâ lillâh!.." yani "Hüküm, ancak Allâh\'ındır!.." diyerek isyan etti.') ==
-     'er-Râsibî: "Hüküm, ancak Allâh\'ındır!.." diyerek isyan etti.',
+     'er-Râsibî: "Hüküm, ancak Allah\'ındır!.." diyerek isyan etti.',
      ses_metni('er-Râsibî: "-Lâ hükme illâ lillâh!.." yani "Hüküm, ancak Allâh\'ındır!.." diyerek isyan etti.'))
 dene("ibare + parantezli meal", ses_metni('mensuptu. "Lâ hükme illâ billâh" (Hüküm, yalnız Allâh\'a âittir.) diyerek') ==
-     "mensuptu. (Hüküm, yalnız Allâh'a âittir.) diyerek")
+     "mensuptu. (Hüküm, yalnız Allah'a âittir.) diyerek")
 dene("meali yok: Arapça ibare (cümle bozulmaz)",
      ses_metni('okudu. "Semiallâhu limen hamideh" ve "Rabbenâ lekel hamd" demeksizin doğruldu.') ==
      "okudu. Arapça ibare ve Arapça ibare demeksizin doğruldu.")
@@ -124,7 +124,7 @@ dene("âyet ibaresi", ses_metni("Hatta «ve lekad yessernâ'l-Kur'âneli'zzikri 
      "Hatta Arapça ibare buyrulduğu üzere")
 for t in ['"İhvanü\'s-Safâ ve Hullenü\'l-Vefâ" adlı cemiyet', 'O da: "-Bir perde arkasından söylüyorlar." dedi.',
           '"Emr-i bi\'l-ma\'rûf ve nehy-i ani\'l-münker" vazifesi', '"Bâtıl İtikâdî Mezhepler" kitabı', 'Meselâ «Elhamdulillâhi rabbilâlemîn», dedi']:
-    dene("Türkçe / ad / iki kelime değişmez: " + t[:30], ses_metni(t) == t, ses_metni(t))
+    dene("Türkçe / ad / iki kelime değişmez: " + t[:30], ses_metni(t) == t.replace("llâh", "llah"), ses_metni(t))   # 0.5.62: llâh -> llah
 
 # 11) OCR döngüsü ve bozuk Arap harfli parça
 dene("OCR döngüsü tek kelimeye iner", ses_metni("Metinde الكلمة المراد المراد المراد المراد المراد المراد بها yazıyor") == "Metinde الكلمة المراد بها yazıyor")   # 0.5.54: Türkçesiz satır bütünüyle okunmaz

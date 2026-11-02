@@ -38,6 +38,82 @@ def ok_filename(j):
     return j["book_name"] + ".epub"
 
 
+# ---------- 0.5.63: seslendirmede cümle arasına girenler ve kopuk cümleler (2 Kasım ölçümü, bütün kitaplar) ----------
+_SAYFA_BASLIK = re.compile(r"^\s*\d{1,4}\s*[•·|]\s*\S.{0,100}$|^.{1,100}\S\s*[•·|]\s*\d{1,4}\s*$")   # "116 • TEFSİRİ KEBİR / TE'VİLÂT"
+_TELIF = re.compile(r"copyright|©|all rights reserved|ali rights reserved|her hakkı mahfuz|tüm hakları saklı|bütün hakları saklı", re.I)
+_YAYINCI = re.compile(r"YAYIN(?:LARI|EVİ|EVI|CILIK|CILIĞI)\b")
+_KAYNAK_CS = re.compile(r"(?<![\w])[cs]\.\s?[\dIVX]")
+_CUMLE_SONU = re.compile(r"[.!?:;…\"”»’')\]]\s*$")
+_TR_DUZ = str.maketrans("ıİâîûÂÎÛçÇğĞöÖşŞüÜ", "iIaiuAIUcCgGoOsSuU")
+
+
+def _duz(t):
+    return re.sub(r"[^a-z0-9]", "", t.translate(_TR_DUZ).lower())
+
+
+def _baslik_parcalari(title):
+    return [d for d in (_duz(p) for p in re.split(r"\s+-\s+", title or "")) if len(d) >= 6]
+
+
+def ust_bilgi_mi(satir, baslik_parcalari, tekrar):
+    """Sayfa üst/alt bilgisi: sayfa no + kitap adı, telif ve yayınevi satırları, kitap adını/yazarını tekrarlayan kısa satır (3+ kez)."""
+    t = satir.strip()
+    if len(t) > 120:
+        return False
+    if _SAYFA_BASLIK.match(t) or _TELIF.search(t):
+        return True
+    if len(t.split()) <= 8 and _YAYINCI.search(t) and t.upper() == t:
+        return True
+    d = _duz(t)
+    return (len(t.split()) <= 5 and tekrar.get(d, 0) >= 3 and any(p in d for p in baslik_parcalari))
+
+
+def kaynak_dizisi_mi(satir):
+    """"Taberî, Tefsîr, c. 27, s. 48, Hâkim, Müstedrek, c. 2, s. 469, …": 3+ cilt/sayfa ve satır neredeyse yalnız bunlardan."""
+    n = len(_KAYNAK_CS.findall(satir))
+    return n >= 3 and len(satir) / n < 40
+
+
+def birlestir(satirlar):
+    """Cümle bitmeden kesilen satır, küçük harfle başlayan sonraki satıra eklenir ("…şiar ‖ edinenlerden"); satır sonunda
+    tireyle bölünen kelime birleşir ("Bun- ‖ larda", "özel- ‖ 191' ligini" -> "özelligini")."""
+    out = []
+    for x in satirlar:
+        if out:
+            onceki = out[-1].rstrip()
+            if re.search(r"[^\W\d_]-$", onceki):
+                y = re.sub(r"^\s*\d{1,4}['’]?\s+(?=[^\W\d_])", "", x).lstrip()
+                if y[:1].islower():
+                    out[-1] = onceki[:-1] + y
+                    continue
+            elif not _CUMLE_SONU.search(onceki) and len(onceki) > 40 and x.lstrip()[:1].islower():
+                out[-1] = onceki + " " + x.lstrip()
+                continue
+        out.append(x)
+    return out
+
+
+def ses_satirlari(tr, title="", tekrar=None):
+    """Bir parçanın seslendirmeye giden satırları (parts_to_epub ile aynı; ölçüm betikleri de bunu kullanır)."""
+    satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for x in (tr or "").split("\n")]  # ayet/madde no okunmaz
+    parca = _baslik_parcalari(title)
+    tekrar = tekrar or {}
+    satirlar = [x for x in satirlar if not ust_bilgi_mi(x, parca, tekrar)]      # 0.5.63
+    satirlar = [ses_metni(x) for x in satirlar]  # 0.5.43: yazarın kaynak gösterimleri ("(Kehf, 110)", "(M. 54)", "(Müslim)") okunmaz
+    satirlar = [x for x in satirlar if x.strip() and not kaynak_dizisi_mi(x)]   # 0.5.63
+    return birlestir(satirlar)                                                  # 0.5.63
+
+
+def kisa_satir_sayilari(parts):
+    import collections
+    say = collections.Counter()
+    for p in parts:
+        for x in (p.get("tr") or "").split("\n"):
+            if 0 < len(x.strip()) <= 120:
+                say[_duz(x)] += 1
+    return say
+
+
 def parts_to_epub(parts, title, out_path):
     """Temiz metin parçalarından EPUB: her parça ayrı bölüm (Kitap Okuma her bölümü bir ses parçası yapar)."""
     import html as _html
@@ -47,11 +123,10 @@ def parts_to_epub(parts, title, out_path):
     book.set_title(title)
     book.set_language("tr")
     bolumler = []
+    tekrar = kisa_satir_sayilari(parts)
     for i, p in enumerate(parts, 1):
         ch = epub.EpubHtml(title=f"{i}", file_name=f"b{i:04d}.xhtml", lang="tr")
-        satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for x in p["tr"].split("\n")]  # ayet/madde no okunmaz
-        satirlar = [ses_metni(x) for x in satirlar]  # 0.5.43: yazarın kaynak gösterimleri ("(Kehf, 110)", "(M. 54)", "(Müslim)") okunmaz
-        satirlar = [x for x in satirlar if x.strip()]
+        satirlar = ses_satirlari(p["tr"], title, tekrar)
         if not satirlar:   # 0.5.60: sesi olmayan parça (hepsi okunmaz/kaynak): boş <body> ebooklib'de "Document is empty" hatası
             continue
         # tur 2/C: parçanın ilk satırı (bölüm başlığı) <h1>: Kitap Okuma M4B bölüm adını buradan alır (Bolum_001 yerine)

@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import time
 import shutil
@@ -244,6 +245,59 @@ def kutuphane_guncelle(jid, osm_baslik, parcalar):
     from .worker import bicimleri_simdi_yaz
     bicimleri_simdi_yaz(jid)        # 0.5.21: düzeltilmiş metnin biçimleri sesi beklemez
     return True
+
+
+def _epub_metni(yol):
+    """Seslendirme EPUB'unun bölüm metinleri (karşılaştırma için)."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(yol) as z:
+            return [z.read(n) for n in sorted(z.namelist()) if re.fullmatch(r"b\d{4}\.xhtml", n.split("/")[-1])]
+    except (OSError, zipfile.BadZipFile):
+        return None
+
+
+def ses_yenile():
+    """0.5.61: ses kuralları (app/ses.py) değişince seslendirilmiş kitapların seslendirme EPUB'u yeni kurallarla yeniden üretilir;
+    bölüm metni değişen kitap Kitap Okuma'ya yeniden gider (Kitap Okuma yalnız değişen bölümleri yeniden okur). Kitap metni değişmez.
+    Döndürür: {"yenilenen": [...], "ayni": n}."""
+    import tempfile
+    from .worker import parts_to_epub
+    yenilenen, ayni = [], 0
+    for j in db.list_jobs():
+        j = dict(j)
+        ana = [dict(p) for p in db.all_parts(j["id"]) if (p["name"] or "").startswith("Parca_") and (p["tr"] or "").strip()]
+        if not ana or not j.get("book_name"):
+            continue
+        name = j["book_name"] or j["title"]
+        yol = db.source_path(j["id"], name + ".epub")
+        if not os.path.exists(yol):
+            continue
+        fd, gecici = tempfile.mkstemp(suffix=".epub", dir=os.path.dirname(yol))
+        os.close(fd)
+        try:
+            parts_to_epub([{"tr": p["tr"]} for p in ana], name, gecici)
+            if _epub_metni(gecici) == _epub_metni(yol):
+                ayni += 1
+                continue
+            os.replace(gecici, yol)
+        finally:
+            if os.path.exists(gecici):
+                os.remove(gecici)
+        upd = dict(status="active", stage="produce", error=None, note="Ses kuralları yenilendi: değişen bölümler yeniden okunuyor",
+                   degisti=time.time())
+        if j["ok_state"] in ("sirada", "calisiyor") and j["status"] == "active":
+            upd["yenile"] = 1
+        else:
+            upd["ok_state"] = "bekliyor"
+        db.update(j["id"], **upd)
+        yenilenen.append(j["title"] or name)
+    return {"yenilenen": yenilenen, "ayni": ayni}
+
+
+@app.post("/api/jobs/ses-yenile")
+def ses_yenile_ucu():
+    return ses_yenile()
 
 
 @app.post("/api/jobs/{job_id}/resume")

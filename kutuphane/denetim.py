@@ -36,6 +36,28 @@ KAYNAK_SATIRI = re.compile(rf"\ba\.\s?g\.\s?[em]\b|\bsh\s*[:.]\s*\d|\bs\.\s*\d|\
                            rf"(?:{SEHIR}),?\s*(?:1[5-9]\d\d|20[0-2]\d)")
 KAPANIS = "\"”»'’"
 
+# 0.5.65: "Eser, sayfa" biçimli kaynak parantezi ("Tehafüt et-Tehafüt, 32", "Tehafüt et-Tehafüt 184-194",
+# "nakleden, Osman, 49", "Sübkî, Tabakât, IV, 116", "21-26 nolu dipnotlar"). Yalnız model "kaynak" dediyse geçerli.
+# Tarih ("Hicri 505", "Aralık 1111", "öl. 505") ve tek küçük kelime + sayı ("yaklaşık 300") kaynak sayılmaz.
+_TARIH_KELIME = (r"(?:sene|senesi|yıl|yılı|yılında|hicri|hicrî|miladi|milâdî|tarih|tarihi|öl|ölüm|ölümü|doğ|doğum|vefat|M|H|"
+                 r"Ocak|Şubat|Mart|Nisan|Mayıs|Haziran|Temmuz|Ağustos|Eylül|Ekim|Kasım|Aralık)")
+_SAYFA_SONU = re.compile(
+    r"(?:\b[IVXL]{1,5}|[^\W\d_]{3,}\.?)\s*,\s*\d{1,4}(?:\s*[-–]\s*\d{1,4})?\s*$|"
+    r"[^\W\d_]{3,}\.?\s+\d{1,3}(?:\s*[-–]\s*\d{1,4})?\s*$|"
+    r"[^\W\d_]{3,}\.?\s+\d{4}\s*[-–]\s*\d{1,4}\s*$")
+_TARIH_SONU = re.compile(rf"\b{_TARIH_KELIME}\.?\s*,?\s*\d[\d\s\-–]*$", re.I)
+_BUYUK = re.compile(r"(?:^|[\s(,.\-])[A-ZÇĞİÖŞÜÂÎÛ][^\W\d_]")
+
+
+def sayfali_kaynak(ic):
+    """0.5.65: parantez içi "Eser, sayfa" biçiminde mi (kaynak gösterimi)."""
+    ic = ic.strip()
+    if re.search(r"nolu\s+dipnot|\bnakleden\b", ic, re.I):
+        return True
+    if not _SAYFA_SONU.search(ic) or _TARIH_SONU.search(ic) or not _BUYUK.search(ic):
+        return False
+    return "," in ic or len(re.sub(r"[\d\s\-–,]+$", "", ic).split()) >= 2
+
 
 def _kucuk(w):
     return w.replace("I", "ı").replace("İ", "i").lower()
@@ -273,12 +295,13 @@ class Denetci:
             # geliyorsa ("(Mirza Hüseyin Ali)(1817-1892)") cümlenin parçasıdır: kaynak sayılmaz
             bitisik = bool(re.match(r"[\w'’(]", sonra[:1]))
             guclu = bool(GUCLU_KAYNAK.search(ic)) and not bitisik
+            sayfali = sayfali_kaynak(ic) and not bitisik
             alinti_ardi = once.rstrip()[-1:] in KAPANIS or once.rstrip().endswith(("..", "!", "?"))
-            kabul = (guclu or alinti_ardi) and not bitisik
+            kabul = (guclu or sayfali or alinti_ardi) and not bitisik
             self.degisiklik.append({"gorev": "parantez", "kabul": kabul, "once": tam, "sonra": "(okunmaz)",
                                     "baglam": f"{once[-70:]}{tam}{sonra[:40]}",
                                     "neden": "cümleye bitişik (kaynak değil)" if bitisik else
-                                    "kaynak işareti var" if guclu else "alıntının ardında" if alinti_ardi else
+                                    "kaynak işareti var" if guclu else "eser ve sayfa numarası" if sayfali else "alıntının ardında" if alinti_ardi else
                                     "model 'kaynak' dedi ama metinde kaynak işareti yok"})
             if kabul:
                 isaret.append((b, tam))

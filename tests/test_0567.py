@@ -33,7 +33,7 @@ c.post(f"/api/kitaplar/{kid}/kutuphane", json={"kutuphanede": True})
 M._dosya_isi(yol, "Gazzali - Filozoflarin Tutarsizligi.pdf")   # yeniden verildi -> listeye döner
 if depo.durum_oku(kid).get("kutuphanede"): hata.append("yeniden verilen kitap Kütüphane'de kaldı")
 html = c.get("/").text
-for p in ('id="t-kutuphane"', 'id="kutuphane"', "Kütüphane'ye kaldır"):
+for p in ('id="t-kutuphane"', 'id="kutuphane"', "topluGizle", "Seçilenleri gizle", "Kitaplarım'a al"):
     if p not in html: hata.append("arayüzde yok: " + p)
 
 print("\n".join(hata) or "test_0567: hepsi geçti")

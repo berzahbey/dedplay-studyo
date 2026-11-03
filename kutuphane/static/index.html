@@ -420,8 +420,10 @@ async function kitaplar(yoklamadan = false) {
   sonImza = imza;
   const y = window.scrollY, yeni = [];
   if (!liste.length) {
-    yeni.push(E("li", { class: "bos" }, tumu.length ? "Bütün kitaplar Kütüphane'de." : "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
+    yeni.push(E("li", { class: "bos" }, tumu.length ? "Bütün kitaplar gizli: Kütüphane sekmesinde duruyorlar." : "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
   }
+  const gizli = tumu.length - liste.length;   // 0.5.70
+  const gizliNot = gizli && liste.length ? E("li", { class: "bos" }, `${gizli} kitap gizli: Kütüphane sekmesinde okunur, dinlenir, düzeltilir; oradan "Kitaplarım'a al" ile geri gelir.`) : null;
   for (const k of liste) {
     const li = E("li", { class: k.kimlik === acik ? "acik" : "" },
       E("div", { class: "eser-ust" },
@@ -446,6 +448,7 @@ async function kitaplar(yoklamadan = false) {
       else { acikAsama = k.asama; ayrinti(k.kimlik, li); }
     }
   }
+  if (gizliNot) yeni.push(gizliNot);
   ul.replaceChildren(...yeni);   // tek seferde: liste bir an boşalıp sayfa yukarı kaymasın
   if (yoklamadan && window.scrollY !== y) window.scrollTo(0, y);
   topluGuncelle(liste);
@@ -557,7 +560,7 @@ async function ayrinti(kid, li) {
   };
   const okuBag = d.kunye ? E("a", { class: "btn", href: "/oku/" + encodeURIComponent(kid) }, "Oku ve düzelt") : null;
   const kut = d.durum.kutuphanede;   // 0.5.67
-  const kutBtn = (kut || ep.length) ? E("button", { class: "btn ghost", type: "button" }, kut ? "Kitaplarım'a geri al" : "Kütüphane'ye kaldır") : null;
+  const kutBtn = kut ? E("button", { class: "btn ghost", type: "button" }, "Kitaplarım'a al") : null;   // 0.5.70: gizleme toplu çubukta
   if (kutBtn) kutBtn.onclick = async () => { kutBtn.disabled = true;
     try { await kutuphaneye(kid, !kut); if (acik === kid) acik = null; if (kutAcik === kid) kutAcik = null; kitaplar(); }
     catch (e) { alert(e.message); kutBtn.disabled = false; } };
@@ -606,7 +609,10 @@ function kutuphaneCiz() {
     dos.onclick = () => { kutDosya = kutDosya === k.anahtar ? null : k.anahtar; kutuphaneCiz(); };
     const ac = s ? E("button", { class: "btn ghost", type: "button", "aria-expanded": kutAcik === k.kimlik }, kutAcik === k.kimlik ? "Kapat" : "Ayrıntı") : null;
     if (ac) ac.onclick = () => { kutAcik = kutAcik === k.kimlik ? null : k.kimlik; kutAcikKutu = null; kutuphaneCiz(); };
-    const yer = !s ? "Stüdyo'dan kaldırıldı · salt okunur" : s.kutuphanede ? "Stüdyo kaydı var · düzeltilebilir" : "Kitaplarım'da";
+    const yer = !s ? "Stüdyo'dan kaldırıldı · salt okunur" : s.kutuphanede ? "Gizli · düzeltilebilir" : "Kitaplarım'da";
+    const geriAl = s && s.kutuphanede ? E("button", { class: "btn ghost", type: "button" }, "Kitaplarım'a al") : null;
+    if (geriAl) geriAl.onclick = async () => { geriAl.disabled = true;
+      try { await kutuphaneye(k.kimlik, false); kitaplar(); } catch (e) { alert(e.message); geriAl.disabled = false; } };
     const li = E("li", { class: kutAcik === k.kimlik && s ? "acik" : "" },
       E("div", { class: "eser-ust" },
         E("div", { class: "tr-ad" }, k.baslik),
@@ -617,7 +623,7 @@ function kutuphaneCiz() {
       E("div", { class: "sag" },
         k.epub.length ? E("a", { class: "btn", href: "/raf/oku?k=" + encodeURIComponent(k.anahtar) }, "Oku") : null,
         s ? E("a", { class: "btn ghost", href: "/oku/" + encodeURIComponent(k.kimlik) }, "Düzelt") : null,
-        k.ses.length ? dinle : null, dos, ac));
+        k.ses.length ? dinle : null, dos, ac, geriAl));
     if (k.ses.length && kutDinle.has(k.anahtar)) li.append(kutDinle.get(k.anahtar));
     if (kutDosya === k.anahtar) li.append(E("div", { class: "ayrinti" }, E("h3", {}, "Dosyalar (dedplay klasörü)"),
       ...[...k.dosyalar, ...k.ses.map(y => ({ bicim: "M4B", dil: "Ses", yol: y }))].map(d => E("div", { class: "epub" },
@@ -649,7 +655,9 @@ function topluCubukKur(ul) {
   const dugme2 = E("button", { class: "btn ghost", type: "button", id: "topluKaynaktan" }, "Seçilenleri kaynaktan yeniden işle");
   dugme2.onclick = topluKaynaktan;
   topluCubuk.style.flexWrap = "wrap";
-  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme2, dugme);
+  const dugme3 = E("button", { class: "btn ghost", type: "button", id: "topluGizle", title: "Kitaplar silinmez: Kitaplarım'dan kalkar, Kütüphane'de okunur, dinlenir, düzeltilir" }, "Seçilenleri gizle");
+  dugme3.onclick = topluGizle;
+  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme2, dugme3, dugme);
   ul.parentNode.insertBefore(topluCubuk, ul);
 }
 function topluGuncelle(liste) {
@@ -664,7 +672,24 @@ function topluGuncelle(liste) {
     d.disabled = !topluSecili.size;
     d.textContent = topluSecili.size ? `Seçilenleri sil (${topluSecili.size})` : "Seçilenleri sil";
     const d2 = topluCubuk.querySelector("#topluKaynaktan"); if (d2) d2.disabled = !topluSecili.size;
+    const d3 = topluCubuk.querySelector("#topluGizle");
+    if (d3) { d3.disabled = !topluSecili.size; d3.textContent = topluSecili.size ? `Seçilenleri gizle (${topluSecili.size})` : "Seçilenleri gizle"; }
   }
+}
+async function topluGizle() {   // 0.5.70: silmeden Kitaplarım'dan kaldırır (Kütüphane'de kalır, düzeltilebilir)
+  const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));
+  if (!secilen.length) return;
+  const d = topluCubuk.querySelector("#topluGizle");
+  topluCalisiyor = true; d.disabled = true;
+  let atlanan = 0;
+  for (let i = 0; i < secilen.length; i++) {
+    d.textContent = `Gizleniyor ${i + 1}/${secilen.length}…`;
+    try { await kutuphaneye(secilen[i].kimlik, true); topluSecili.delete(secilen[i].kimlik); if (acik === secilen[i].kimlik) acik = null; }
+    catch (e) { atlanan++; }
+  }
+  topluCalisiyor = false; d.textContent = "Seçilenleri gizle";
+  if (atlanan) alert(`${atlanan} kitap gizlenmedi: henüz işlenmemiş (EPUB'u yok).`);
+  kitaplar();
 }
 async function topluKaynaktan() {
   const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));

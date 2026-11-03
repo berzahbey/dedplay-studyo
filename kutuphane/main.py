@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.69"
+SURUM = "0.5.70"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -509,7 +509,7 @@ def kutuphaneye(kid: str, g: KutuphaneIstegi):
     if not d:
         raise HTTPException(404, "Böyle bir kitap yok")
     if g.kutuphanede and not d.get("epublar"):
-        raise HTTPException(409, "Kitap henüz işlenmedi: yalnız işlenmiş kitaplar Kütüphane'ye kaldırılabilir")
+        raise HTTPException(409, "Kitap henüz işlenmedi: yalnız işlenmiş kitaplar gizlenebilir")
     depo.durum_yaz(kid, kutuphanede=int(time.time()) if g.kutuphanede else None)
     return {"ok": True, "kutuphanede": g.kutuphanede}
 

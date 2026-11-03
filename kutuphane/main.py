@@ -4,19 +4,19 @@ import re
 from urllib.parse import quote
 
 import requests
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from fastapi import File, UploadFile
 
-from . import arsiv, cikti, depo, epub, epubcheck, katalog, kaynak, osmanlica, yz
+from . import arsiv, cikti, raf, depo, epub, epubcheck, katalog, kaynak, osmanlica, yz
 from . import kitap as K
 
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.67"
+SURUM = "0.5.68"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -413,6 +413,87 @@ def kitap_sil(kid: str, dosyalar: bool = False):
             print(f"Stüdyo işi {is_no} silinemedi: {type(e).__name__}: {e}", flush=True)
     # 0.5.19: sırada bekleyen kitap hemen silinir; işi çalışan kitabın işi durdurulup kitap ardından silinir
     return {"ok": True, "durum": depo.sil_iste(kid), "silinen": silinen}
+
+
+# ---------------- 0.5.68: Kütüphane rafı (dedplay klasörü) ----------------
+@app.get("/api/raf")
+def raf_liste():
+    return {"bagli": os.path.isdir(raf.KOK), "kitaplar": raf.tara()}
+
+
+def _raf_yol(yol, uzanti=None):
+    tam = raf.guvenli(yol)
+    if not tam or not os.path.isfile(tam) or (uzanti and not tam.lower().endswith(uzanti)):
+        raise HTTPException(404, "Dosya bulunamadı")
+    return tam
+
+
+@app.get("/api/raf/dosya")
+def raf_dosya(yol: str, request: Request, indir: bool = False):
+    """Dosyayı verir; ses için parça parça (Range) ki ileri/geri sarılabilsin."""
+    tam = _raf_yol(yol)
+    boyut = os.path.getsize(tam)
+    tur = {".m4b": "audio/mp4", ".mp3": "audio/mpeg", ".epub": "application/epub+zip", ".pdf": "application/pdf",
+           ".txt": "text/plain; charset=utf-8", ".html": "text/html; charset=utf-8",
+           ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}.get(
+        os.path.splitext(tam)[1].lower(), "application/octet-stream")
+    bas, son, kod = 0, boyut - 1, 200
+    m = re.match(r"bytes=(\d*)-(\d*)", request.headers.get("range", ""))
+    if m and (m.group(1) or m.group(2)):
+        if m.group(1):
+            bas = int(m.group(1))
+            son = int(m.group(2)) if m.group(2) else boyut - 1
+        else:
+            bas = max(0, boyut - int(m.group(2)))
+        son = min(son, boyut - 1)
+        if bas > son:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{boyut}"})
+        kod = 206
+
+    def akis():
+        with open(tam, "rb") as f:
+            f.seek(bas)
+            kalan = son - bas + 1
+            while kalan > 0:
+                parca = f.read(min(1 << 16, kalan))
+                if not parca:
+                    break
+                kalan -= len(parca)
+                yield parca
+    ad = quote(os.path.basename(tam))
+    bas_ = {"Accept-Ranges": "bytes", "Content-Length": str(son - bas + 1),
+            "Content-Disposition": f"{'attachment' if indir else 'inline'}; filename*=UTF-8''{ad}"}
+    if kod == 206:
+        bas_["Content-Range"] = f"bytes {bas}-{son}/{boyut}"
+    return StreamingResponse(akis(), status_code=kod, media_type=tur, headers=bas_)
+
+
+@app.get("/api/raf/epub")
+def raf_epub(yol: str):
+    try:
+        y = raf.epub_yapi(_raf_yol(yol, ".epub"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(422, f"EPUB okunamadı: {type(e).__name__}")
+    return {"baslik": y["baslik"], "bolumler": [{"no": b["no"], "baslik": b["baslik"]} for b in y["bolumler"]]}
+
+
+@app.get("/api/raf/epub/bolum")
+def raf_epub_bolum(yol: str, no: int = 0):
+    try:
+        return raf.epub_bolum(_raf_yol(yol, ".epub"), no)
+    except HTTPException:
+        raise
+    except IndexError:
+        raise HTTPException(404, "Böyle bir bölüm yok")
+    except Exception as e:
+        raise HTTPException(422, f"Bölüm okunamadı: {type(e).__name__}")
+
+
+@app.get("/raf/oku", response_class=HTMLResponse)
+def raf_oku_sayfasi():
+    return open(os.path.join(STATIK, "raf.html"), encoding="utf-8").read()
 
 
 class KutuphaneIstegi(BaseModel):

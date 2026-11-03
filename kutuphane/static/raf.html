@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kütüphane · Dedplay Stüdyo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+<style>
+[hidden] { display: none !important; }
+:root {
+  --paper: #f6f3ec; --surface: #ffffff; --ink: #1f2a28; --muted: #66716e; --line: #ddd8cc;
+  --tile: #1b6e5a; --tile-soft: #e1efe9; --lapis: #2c4a7c; --danger: #9c3b2e;
+  --serif: "Literata", Georgia, serif; --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --arab: "Amiri", "Traditional Arabic", serif; --boy: 19px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #141a18; --surface: #1c2421; --ink: #e2e8e5; --muted: #98a4a0; --line: #2f3b37;
+          --tile: #58bfa0; --tile-soft: #1e3a31; --lapis: #8fb0e6; --danger: #e08a7c; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 var(--sans); }
+header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--paper) 92%, transparent);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: env(safe-area-inset-top, 0px) 12px 0; }
+.cubuk { max-width: 1000px; margin: 0 auto; display: flex; gap: 8px; align-items: center; min-height: 52px; flex-wrap: wrap; padding: 6px 0; }
+.cubuk .ad { flex: 1 1 200px; min-width: 0; font: 600 1rem var(--serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+a.dg, button.dg, select { font: 600 .9rem var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 11px; cursor: pointer; text-decoration: none; white-space: nowrap; }
+select { max-width: 100%; font-weight: 400; }
+button.dg:disabled { opacity: .45; cursor: default; }
+.diller { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.diller button { border: 0; background: var(--surface); color: var(--ink); font: 600 .85rem var(--sans); padding: 7px 10px; cursor: pointer; }
+.diller button[aria-pressed="true"] { background: var(--tile-soft); color: var(--tile); }
+button:focus-visible, a:focus-visible, select:focus-visible { outline: 3px solid var(--lapis); outline-offset: 2px; }
+.gez { max-width: 1000px; margin: 0 auto; display: flex; gap: 8px; align-items: center; padding: 0 0 8px; }
+.gez select { flex: 1; min-width: 0; }
+main { max-width: 40em; margin: 0 auto; padding: 24px 20px 160px; font-size: var(--boy); }
+main h1, main h2, main h3, main h4 { font-family: var(--serif); line-height: 1.3; }
+main p { font-family: var(--serif); line-height: 1.7; margin: 0 0 .6em; text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
+main[dir="rtl"] { font-family: var(--arab); }
+main[dir="rtl"] p, main[dir="rtl"] h1, main[dir="rtl"] h2, main[dir="rtl"] h3 { font-family: var(--arab); line-height: 2; text-align: right; }
+main table { border-collapse: collapse; } main td, main th { border: 1px solid var(--line); padding: 4px 8px; }
+.bilgi { color: var(--muted); text-align: center; padding: 40px 0; }
+.alt { display: flex; justify-content: space-between; gap: 8px; margin-top: 32px; }
+footer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; background: var(--surface); border-top: 1px solid var(--line);
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); }
+footer .ic { max-width: 1000px; margin: 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+footer audio { flex: 1 1 260px; min-width: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="cubuk">
+    <a class="dg" href="/#kutuphane">← Kütüphane</a>
+    <div class="ad" id="ad">Yükleniyor…</div>
+    <div class="diller" id="diller" role="group" aria-label="Dil"></div>
+    <button class="dg" type="button" id="kucuk" aria-label="Yazıyı küçült">A−</button>
+    <button class="dg" type="button" id="buyuk" aria-label="Yazıyı büyüt">A+</button>
+  </div>
+  <div class="gez" id="gez" hidden>
+    <button class="dg" type="button" id="once" aria-label="Önceki bölüm">‹</button>
+    <select id="bolumSec" aria-label="Bölüm"></select>
+    <button class="dg" type="button" id="sonra" aria-label="Sonraki bölüm">›</button>
+  </div>
+</header>
+<main id="metin"><p class="bilgi">Yükleniyor…</p></main>
+<footer id="calar" hidden>
+  <div class="ic">
+    <select id="kisim" aria-label="Ses kısmı" hidden></select>
+    <audio id="ses" controls preload="metadata"></audio>
+    <select id="hiz" aria-label="Hız"><option value="0.85">0.85×</option><option value="1" selected>1×</option><option value="1.15">1.15×</option><option value="1.3">1.3×</option></select>
+  </div>
+</footer>
+<script>
+const $ = s => document.querySelector(s);
+const E = (t, a = {}, ...c) => { const e = document.createElement(t); for (const [k, v] of Object.entries(a)) k.startsWith("on") ? e[k] = v : e.setAttribute(k, v); e.append(...c.filter(x => x != null)); return e; };
+const ara = new URLSearchParams(location.search);
+const sakla = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+const al = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
+const SAG = new Set(["Osmanlıca", "Arapça"]);
+let kitap = null, epub = null, yapi = null, no = 0;
+
+async function api(y) { const r = await fetch(y); const v = await r.json().catch(() => ({})); if (!r.ok) throw new Error(v.detail || `Sunucu hatası (${r.status})`); return v; }
+function boyutKur(b) { b = Math.min(30, Math.max(14, b)); document.documentElement.style.setProperty("--boy", b + "px"); sakla("raf:boy", b); return b; }
+let boy = boyutKur(al("raf:boy", 19));
+$("#kucuk").onclick = () => boy = boyutKur(boy - 1);
+$("#buyuk").onclick = () => boy = boyutKur(boy + 1);
+
+async function epubAc(e) {
+  epub = e; sakla("raf:dil:" + kitap.anahtar, e.dil);
+  for (const b of $("#diller").children) b.setAttribute("aria-pressed", b.dataset.dil === e.dil);
+  const m = $("#metin"); m.dir = SAG.has(e.dil) ? "rtl" : "ltr"; m.lang = SAG.has(e.dil) ? "ota" : "tr";
+  try { yapi = await api("/api/raf/epub?yol=" + encodeURIComponent(e.yol)); }
+  catch (x) { m.replaceChildren(E("p", { class: "bilgi" }, x.message)); return; }
+  const s = $("#bolumSec"); s.replaceChildren(...yapi.bolumler.map(b => E("option", { value: b.no }, b.baslik)));
+  $("#gez").hidden = yapi.bolumler.length < 2;
+  const yer = al("raf:yer:" + e.yol, { no: 0, y: 0 });
+  await bolum(yer.no, yer.y);
+}
+async function bolum(n, y = 0) {
+  if (!yapi || !yapi.bolumler.length) { $("#metin").replaceChildren(E("p", { class: "bilgi" }, "Bu EPUB'da okunacak bölüm yok.")); return; }
+  no = Math.min(Math.max(0, n), yapi.bolumler.length - 1);
+  $("#bolumSec").value = no; $("#once").disabled = no === 0; $("#sonra").disabled = no === yapi.bolumler.length - 1;
+  const m = $("#metin");
+  let d; try { d = await api(`/api/raf/epub/bolum?yol=${encodeURIComponent(epub.yol)}&no=${no}`); }
+  catch (x) { m.replaceChildren(E("p", { class: "bilgi" }, x.message)); return; }
+  m.innerHTML = d.html;   // sunucuda temizlendi: betik, stil, resim, olay öznitelikleri yok
+  const alt = E("div", { class: "alt" },
+    no > 0 ? E("button", { class: "dg", type: "button", onclick: () => bolum(no - 1) }, "‹ " + yapi.bolumler[no - 1].baslik) : E("span"),
+    no < yapi.bolumler.length - 1 ? E("button", { class: "dg", type: "button", onclick: () => bolum(no + 1) }, yapi.bolumler[no + 1].baslik + " ›") : E("span"));
+  m.append(alt);
+  window.scrollTo(0, y ? y * (document.documentElement.scrollHeight - innerHeight) : 0);
+  yerSakla();
+}
+function yerSakla() {
+  if (!epub) return;
+  const h = document.documentElement.scrollHeight - innerHeight;
+  sakla("raf:yer:" + epub.yol, { no, y: h > 0 ? scrollY / h : 0 });
+}
+let zam = null; addEventListener("scroll", () => { clearTimeout(zam); zam = setTimeout(yerSakla, 400); }, { passive: true });
+$("#bolumSec").onchange = e => bolum(+e.target.value);
+$("#once").onclick = () => bolum(no - 1);
+$("#sonra").onclick = () => bolum(no + 1);
+
+function calarKur() {
+  if (!kitap.ses.length) return;
+  $("#calar").hidden = false;
+  const a = $("#ses"), k = $("#kisim"), anahtar = "raf:ses:" + kitap.anahtar;
+  const yer = al(anahtar, { kisim: 0, t: 0 });
+  if (kitap.ses.length > 1) { k.hidden = false; k.replaceChildren(...kitap.ses.map((s, i) => E("option", { value: i }, `Kısım ${i + 1}`))); }
+  const yukle = (i, t) => { k.value = i; a.src = "/api/raf/dosya?yol=" + encodeURIComponent(kitap.ses[i]);
+    a.addEventListener("loadedmetadata", () => { if (t) a.currentTime = t; a.playbackRate = +$("#hiz").value; }, { once: true }); };
+  yukle(Math.min(yer.kisim, kitap.ses.length - 1), yer.t);
+  k.onchange = () => { yukle(+k.value, 0); a.play().catch(() => {}); };
+  $("#hiz").onchange = () => a.playbackRate = +$("#hiz").value;
+  let son = 0;
+  a.ontimeupdate = () => { if (Math.abs(a.currentTime - son) > 5) { son = a.currentTime; sakla(anahtar, { kisim: +k.value || 0, t: a.currentTime }); } };
+  a.onended = () => { const i = (+k.value || 0) + 1; if (i < kitap.ses.length) { yukle(i, 0); a.play().catch(() => {}); } };
+}
+
+(async () => {
+  let raf; try { raf = await api("/api/raf"); } catch (x) { $("#metin").replaceChildren(E("p", { class: "bilgi" }, x.message)); return; }
+  kitap = raf.kitaplar.find(k => k.anahtar === ara.get("k"));
+  if (!kitap) { $("#ad").textContent = "Kitap bulunamadı"; $("#metin").replaceChildren(E("p", { class: "bilgi" }, "Bu kitap dedplay klasöründe yok.")); return; }
+  document.title = kitap.baslik + " · Kütüphane";
+  $("#ad").textContent = kitap.baslik + (kitap.yazar ? " · " + kitap.yazar : "");
+  for (const e of kitap.epub) $("#diller").append(E("button", { type: "button", "data-dil": e.dil, "aria-pressed": "false", onclick: () => epubAc(e) }, e.dil));
+  $("#diller").hidden = kitap.epub.length < 2;
+  calarKur();
+  if (!kitap.epub.length) { $("#metin").replaceChildren(E("p", { class: "bilgi" }, "Bu kitabın EPUB'u yok; yalnız dinlenebilir.")); return; }
+  const istenen = ara.get("dil") || al("raf:dil:" + kitap.anahtar, null);
+  await epubAc(kitap.epub.find(e => e.dil === istenen) || kitap.epub[0]);
+})();
+</script>
+</body>
+</html>

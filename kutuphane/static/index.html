@@ -38,7 +38,7 @@ h2 { font: 600 1.35rem/1.3 var(--serif); margin: 36px 0 12px; }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--tile); }
 button.btn { font: 600 .95rem var(--sans); border-radius: 8px; padding: 9px 16px; cursor: pointer;
   border: 1px solid var(--tile); background: var(--tile); color: var(--surface); }
-button.btn.ghost { background: transparent; color: var(--tile); }
+button.btn.ghost, a.btn.ghost { background: transparent; color: var(--tile); }
 button.btn.danger { background: transparent; color: var(--danger); border-color: var(--danger); }
 button.btn:disabled { opacity: .5; cursor: default; }
 a.btn { font: 600 .95rem var(--sans); border-radius: 8px; padding: 9px 16px; text-decoration: none; display: inline-block;
@@ -141,10 +141,10 @@ label.secim input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
     <div class="ara">
       <input type="search" id="kutAra" placeholder="Kütüphane'de ara: eser ya da yazar adı" aria-label="Kütüphane'de ara" style="flex:1">
       <select id="kutSira" aria-label="Sıralama" style="font:1rem var(--sans);padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)">
-        <option value="ad">Ada göre</option><option value="yazar">Yazara göre</option><option value="yeni">Son kaldırılan</option>
+        <option value="ad">Ada göre</option><option value="yazar">Yazara göre</option><option value="yeni">En yeni</option>
       </select>
     </div>
-    <p class="meta" style="margin:8px 0 0">İşlenmiş kitaplar burada durur: okunur, düzeltilir, dinlenir; seslendirme güncellemeleri sürer. "Kitaplarım" listesi kısa kalır.</p>
+    <p class="meta" style="margin:8px 0 0">dedplay klasöründeki bütün bitmiş kitaplar: EPUB'lar, öteki biçimler ve sesli kitaplar. Kitap Stüdyo'dan silinse de burada kalır ve okunur, dinlenir; düzeltme yalnız Stüdyo kaydı olan kitapta yapılır.</p>
     <ul class="eserler" id="kutuphane"></ul>
   </section>
 
@@ -233,7 +233,7 @@ for (const b of document.querySelectorAll('[role="tab"]')) {
       x.setAttribute("aria-selected", x === b); $("#" + x.getAttribute("aria-controls")).hidden = x !== b;
     }
     if (b.id === "t-openiti") $("#sorgu").focus();
-    if (b.id === "t-kutuphane") $("#kutAra").focus();
+    if (b.id === "t-kutuphane") { $("#kutAra").focus(); rafYukle(); }
     if (b.id === "t-ekle" && !$("#gez").children.length) gez("");
   };
 }
@@ -390,7 +390,7 @@ async function kitaplar(yoklamadan = false) {
   try { isler = Object.fromEntries((await api("/api/jobs")).map(j => [j.id, j])); } catch (e) { isler = {}; }
   const ul = $("#kitaplar"); topluCubukKur(ul);
   const tumu = liste; liste = tumu.filter(k => !k.kutuphanede);   // 0.5.67: Kütüphane'dekiler ayrı sekmede
-  kutuphaneCiz(tumu.filter(k => k.kutuphanede));
+  studyoListe = tumu; kutuphaneCiz();
   const suruyor = liste.some(k => !["hazır", "hata"].includes(k.asama)) || Object.values(isler).some(j => j.status === "active");
   clearTimeout(yoklama); if (suruyor) yoklama = setTimeout(() => kitaplar(true), 3000);
   const imza = JSON.stringify([acik, [...topluSecili], liste.map(k => [k.kimlik, k.baslik, k.baslik_asil, k.yazar, k.asama, k.hata,
@@ -542,45 +542,67 @@ async function ayrinti(kid, li) {
     catch (e) { alert(e.message); kutBtn.disabled = false; } };
   kutu.append(E("div", { class: "alt" }, okuBag, kutBtn, yeniden, kaynaktan, osm, sil));
 }
-// ---- 0.5.67: Kütüphane (işlenmiş kitaplar; listeden kaldırılır, silinmez) ----
+// ---- 0.5.68: Kütüphane = dedplay klasörü (bitmiş kitapların bütün biçimleri; Stüdyo'dan silinen kitap da burada kalır) ----
 const kutuphaneye = (kid, evet) => api(`/api/kitaplar/${encodeURIComponent(kid)}/kutuphane`, { method: "POST", body: JSON.stringify({ kutuphanede: evet }) });
-const aramaSade = t => (t || "").toLocaleLowerCase("tr").replace(/ı/g, "i").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\u0600-\u06ff]+/g, " ");
-let kutListe = [], kutImza = null, kutAcik = null, kutAcikKutu = null;
-const kutDinle = new Map();   // kimlik -> açık ses çalar kutusu (liste yenilenince aynı kutu kalır, ses kesilmez)
-function kutuphaneCiz(liste) {
-  if (liste) kutListe = liste;
-  $("#kutSay").textContent = kutListe.length ? `(${kutListe.length})` : "";
+const aramaSade = t => (t || "").toLocaleLowerCase("tr").replace(/ı/g, "i").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9؀-ۿ]+/g, " ");
+let rafListe = [], rafBagli = true, rafYuklendi = false, studyoListe = [], kutImza = null, kutAcik = null, kutAcikKutu = null, kutDosya = null;
+const kutDinle = new Map();   // anahtar -> açık ses çalar kutusu (liste yenilenince aynı kutu kalır, ses kesilmez)
+async function rafYukle() {
+  try { const v = await api("/api/raf"); rafListe = v.kitaplar; rafBagli = v.bagli; rafYuklendi = true; } catch (e) { return; }
+  kutImza = null; kutuphaneCiz();
+}
+function rafSesCalar(yollar) {
+  const kutu = E("div", { class: "ses" });
+  yollar.forEach((y, i) => kutu.append(E("div", {}, yollar.length > 1 ? E("p", { class: "meta" }, `Kısım ${i + 1}`) : null,
+    E("audio", { controls: "", preload: "metadata", src: "/api/raf/dosya?yol=" + encodeURIComponent(y), style: "width:100%" }))));
+  return kutu;
+}
+function kutuphaneCiz() {
+  $("#kutSay").textContent = rafListe.length ? `(${rafListe.length})` : "";
   const q = aramaSade($("#kutAra").value).trim(), sira = $("#kutSira").value;
-  const ad = k => aramaSade(k.baslik || k.baslik_asil || k.kimlik);
-  let goster = kutListe.filter(k => !q || q.split(" ").every(p => (ad(k) + " " + aramaSade(k.yazar)).includes(p)));
-  goster = goster.sort(sira === "yeni" ? (a, b) => (b.kutuphanede || 0) - (a.kutuphanede || 0)
+  const ad = k => aramaSade(k.baslik);
+  let goster = rafListe.filter(k => !q || q.split(" ").every(p => (ad(k) + " " + aramaSade(k.yazar)).includes(p)));
+  goster = goster.sort(sira === "yeni" ? (a, b) => (b.tarih || 0) - (a.tarih || 0)
     : sira === "yazar" ? (a, b) => aramaSade(a.yazar).localeCompare(aramaSade(b.yazar)) || ad(a).localeCompare(ad(b))
     : (a, b) => ad(a).localeCompare(ad(b)));
-  const ses = k => k.studyo ? isler[k.studyo.is] : null;
-  const imza = JSON.stringify([q, sira, kutAcik, [...kutDinle.keys()], goster.map(k => [k.kimlik, k.baslik, k.yazar, k.asama, sesYazisi(ses(k))])]);
+  const kayit = Object.fromEntries(studyoListe.map(k => [k.kimlik, k]));
+  const sesDurum = k => { const s = kayit[k.kimlik]; return s && s.studyo ? isler[s.studyo.is] : null; };
+  const imza = JSON.stringify([rafYuklendi, q, sira, kutAcik, kutDosya, [...kutDinle.keys()], goster.map(k => [k.anahtar, k.kimlik, k.ses.length, k.dosyalar.length,
+    kayit[k.kimlik]?.kutuphanede, kayit[k.kimlik]?.asama, sesYazisi(sesDurum(k))])]);
   if (imza === kutImza) return;
   kutImza = imza;
   const ul = $("#kutuphane"), yeni = [];
-  if (!kutListe.length) yeni.push(E("li", { class: "bos" }, "Kütüphane boş. Bir kitabı açıp \"Kütüphane'ye kaldır\" de ya da Kitaplarım'da seçip toplu kaldır."));
+  if (!rafYuklendi) yeni.push(E("li", { class: "bos" }, "Yükleniyor…"));
+  else if (!rafBagli) yeni.push(E("li", { class: "bos" }, "dedplay klasörü bağlı değil."));
+  else if (!rafListe.length) yeni.push(E("li", { class: "bos" }, "dedplay klasöründe henüz bitmiş kitap yok."));
   else if (!goster.length) yeni.push(E("li", { class: "bos" }, "Aramaya uyan kitap yok."));
   for (const k of goster) {
-    const j = ses(k), bitti = j && j.ok_state === "bitti";
-    const dinle = E("button", { class: "btn ghost", type: "button", "aria-expanded": kutDinle.has(k.kimlik) }, kutDinle.has(k.kimlik) ? "Sesi kapat" : "Dinle");
-    dinle.onclick = () => { kutDinle.has(k.kimlik) ? kutDinle.delete(k.kimlik) : kutDinle.set(k.kimlik, sesCalar(j.id)); kutuphaneCiz(); };
-    const ac = E("button", { class: "btn ghost", type: "button", "aria-expanded": kutAcik === k.kimlik }, kutAcik === k.kimlik ? "Kapat" : "Ayrıntı");
-    ac.onclick = () => { kutAcik = kutAcik === k.kimlik ? null : k.kimlik; kutAcikKutu = null; kutuphaneCiz(); };
-    const li = E("li", { class: kutAcik === k.kimlik ? "acik" : "" },
+    const s = kayit[k.kimlik], j = sesDurum(k), calisiyor = j && j.ok_state && j.ok_state !== "bitti";
+    const bicimler = [...k.epub.map(e => e.dil), ...new Set(k.dosyalar.filter(d => d.bicim !== "EPUB").map(d => d.bicim))];
+    const dinle = E("button", { class: "btn ghost", type: "button", "aria-expanded": kutDinle.has(k.anahtar) }, kutDinle.has(k.anahtar) ? "Sesi kapat" : "Dinle");
+    dinle.onclick = () => { kutDinle.has(k.anahtar) ? kutDinle.delete(k.anahtar) : kutDinle.set(k.anahtar, rafSesCalar(k.ses)); kutuphaneCiz(); };
+    const dos = E("button", { class: "btn ghost", type: "button", "aria-expanded": kutDosya === k.anahtar }, "Dosyalar");
+    dos.onclick = () => { kutDosya = kutDosya === k.anahtar ? null : k.anahtar; kutuphaneCiz(); };
+    const ac = s ? E("button", { class: "btn ghost", type: "button", "aria-expanded": kutAcik === k.kimlik }, kutAcik === k.kimlik ? "Kapat" : "Ayrıntı") : null;
+    if (ac) ac.onclick = () => { kutAcik = kutAcik === k.kimlik ? null : k.kimlik; kutAcikKutu = null; kutuphaneCiz(); };
+    const yer = !s ? "Stüdyo'dan kaldırıldı · salt okunur" : s.kutuphanede ? "Stüdyo kaydı var · düzeltilebilir" : "Kitaplarım'da";
+    const li = E("li", { class: kutAcik === k.kimlik && s ? "acik" : "" },
       E("div", { class: "eser-ust" },
-        arapHarfli(k.baslik_asil || k.baslik) && !k.baslik ? E("div", { class: "ar", lang: "ar", dir: "rtl" }, k.baslik_asil)
-                                                          : E("div", { class: "tr-ad" }, k.baslik || k.kimlik),
-        E("div", { class: "meta" }, E("span", {}, k.yazar || ""),
-          k.asama !== "hazır" ? asamaYazisi(k) : null,
-          sesYazisi(j) ? E("span", { class: "asama" + (bitti ? " hazir" : "") }, sesYazisi(j)) : E("span", {}, "Seslendirilmedi"))),
+        E("div", { class: "tr-ad" }, k.baslik),
+        E("div", { class: "meta" }, E("span", {}, k.yazar || ""), E("span", {}, bicimler.join(" · ")),
+          k.ses.length ? E("span", { class: "asama hazir" }, calisiyor ? "Sesli kitap (yenileniyor)" : "Sesli kitap")
+                       : E("span", { class: "asama" }, calisiyor ? sesYazisi(j) : "Ses yok"),
+          E("span", {}, yer))),
       E("div", { class: "sag" },
-        E("a", { class: "btn", href: "/oku/" + encodeURIComponent(k.kimlik) }, "Oku"),
-        bitti ? dinle : null, ac));
-    if (bitti && kutDinle.has(k.kimlik)) li.append(kutDinle.get(k.kimlik));
-    if (kutAcik === k.kimlik) {
+        k.epub.length ? E("a", { class: "btn", href: "/raf/oku?k=" + encodeURIComponent(k.anahtar) }, "Oku") : null,
+        s ? E("a", { class: "btn ghost", href: "/oku/" + encodeURIComponent(k.kimlik) }, "Düzelt") : null,
+        k.ses.length ? dinle : null, dos, ac));
+    if (k.ses.length && kutDinle.has(k.anahtar)) li.append(kutDinle.get(k.anahtar));
+    if (kutDosya === k.anahtar) li.append(E("div", { class: "ayrinti" }, E("h3", {}, "Dosyalar (dedplay klasörü)"),
+      ...[...k.dosyalar, ...k.ses.map(y => ({ bicim: "M4B", dil: "Ses", yol: y }))].map(d => E("div", { class: "epub" },
+        E("a", { href: "/api/raf/dosya?indir=1&yol=" + encodeURIComponent(d.yol) }, `${d.bicim} · ${d.dil}`),
+        E("span", { class: "meta" }, d.yol.split("/").pop() + (d.boyut ? " · " + boyut(d.boyut) : ""))))));
+    if (s && kutAcik === k.kimlik) {
       if (kutAcikKutu) li.append(kutAcikKutu);
       else { const [a, b] = [acikKutu, acikKid]; ayrinti(k.kimlik, li); kutAcikKutu = acikKutu; acikKutu = a; acikKid = b; }
     }
@@ -683,7 +705,8 @@ async function topluSil() {
   if (mesaj) alert(mesaj);
   kitaplar();
 }
-servisler(); kitaplar(); setInterval(servisler, 60000);
+servisler(); kitaplar(); rafYukle(); setInterval(servisler, 60000);
+if (location.hash === "#kutuphane") $("#t-kutuphane").click();   // 0.5.68: okuma ekranından dönüş
 </script>
 </body>
 </html>

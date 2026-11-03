@@ -10,13 +10,13 @@ from pydantic import BaseModel
 
 from fastapi import File, UploadFile
 
-from . import cikti, depo, epub, epubcheck, katalog, kaynak, osmanlica, yz
+from . import arsiv, cikti, depo, epub, epubcheck, katalog, kaynak, osmanlica, yz
 from . import kitap as K
 
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.65"
+SURUM = "0.5.66"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -117,8 +117,10 @@ def kaynak_gez(yol: str = ""):
         elif ad.lower().endswith(UZANTILAR):
             dosya.append({"ad": ad, "boyut": os.path.getsize(p)})
     ekli = {k["kimlik"] for k in depo.liste()}
+    dizin = arsiv.cikti_dizini() if dosya else []
     for f in dosya:
         f["ekli"] = kaynak.kimlik_uret(os.path.join(tam, f["ad"])) in ekli
+        f["arsivde"] = not f["ekli"] and arsiv.bul(f["ad"], dizin) is not None   # 0.5.66: daha önce işlenmiş
     return {"yol": os.path.relpath(tam, KAYNAK) if tam != os.path.realpath(KAYNAK) else "", "klasor": klasor, "dosya": dosya}
 
 
@@ -148,6 +150,29 @@ def _dosya_isi(yol, gorunen_ad):
                  baslik_asil=ilk.get("baslik_asil") or baslik, yazar=ilk.get("yazar") or yazar,
                  eklendi=ilk.get("eklendi") or int(time.time()))
     return {"ok": True, "kimlik": kid}
+
+
+@app.get("/api/arsiv-kontrol")
+def arsiv_kontrol(ad: str, yol: str = ""):
+    """0.5.66: kitap verilmeden önce sorulur: kitap Stüdyo'da var mı, ya da daha önce işlenip kaldırıldı mı?
+    yol: arşivde (/kaynak) göreli yol; boşsa yüklenen dosya ya da yapıştırılan metin."""
+    ad = os.path.basename(ad or "")
+    if not ad:
+        raise HTTPException(400, "Dosya adı gerekli")
+    tam = _guvenli(yol) if yol else os.path.join(depo.VERI, "yuklenen", ad)
+    kid = kaynak.kimlik_uret(tam)
+    if not depo.durum_oku(kid):
+        kid = _ayni_adli_kitap(ad)
+    if kid:
+        d = depo.durum_oku(kid)
+        b = d.get("baslik") or os.path.splitext(ad)[0]
+        return {"var": True, "nerede": "studyo", "kimlik": kid,
+                "mesaj": f"“{b}” Stüdyo'da zaten var (aşama: {d.get('asama') or '?'}).\n"
+                         "Yeniden verilirse aynı kitap baştan işlenir. Yeniden işlensin mi?"}
+    iz = arsiv.bul(ad)
+    if iz:
+        return {"var": True, "nerede": "arsiv", **iz, "mesaj": arsiv.mesaj(ad, iz)}
+    return {"var": False}
 
 
 class SunucuDosyasi(BaseModel):
@@ -361,6 +386,10 @@ def kitap_sil(kid: str, dosyalar: bool = False):
     if not d:
         raise HTTPException(404, "Böyle bir kitap yok")
     silinen = 0
+    try:   # 0.5.66: işlenmiş kitabın izi kalır (yeniden verilirse uyarı)
+        arsiv.kaydet(kid, d, dosyalar_silindi=dosyalar)
+    except Exception as e:
+        print(f"Arşiv kaydı yazılamadı ({kid}): {type(e).__name__}: {e}", flush=True)
     if dosyalar:  # 0.5.39: "dosyalarını da sil": EPUB'lar burada, öteki biçimler ve sesler Stüdyo işiyle aşağıda
         kit = None
         try:

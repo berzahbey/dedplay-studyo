@@ -183,6 +183,11 @@ async function api(yol, secenek = {}) {
   if (!r.ok) throw new Error(veri.detail || `Sunucu hatası (${r.status})`);
   return veri;
 }
+// 0.5.66: kitap verilmeden önce: Stüdyo'da var mı, daha önce işlenip kaldırıldı mı? Varsa onay sorulur.
+async function oncedenSor(ad, yol = "") {
+  let v; try { v = await api("/api/arsiv-kontrol?" + new URLSearchParams({ ad, yol })); } catch (e) { return true; }
+  return !v.var || confirm(v.mesaj);
+}
 // 0.5.39: silme onayı; "Dosyalarını da sil" seçilirse kitabın dedplay klasöründeki dosyaları da silinir
 function silOnay(metin) {
   return new Promise(coz => {
@@ -299,19 +304,23 @@ async function gez(yol) {
   ul.replaceChildren();
   for (const k of d.klasor) ul.append(E("li", {}, E("button", { class: "klasor", type: "button", onclick: () => gez(d.yol ? d.yol + "/" + k : k) }, k)));
   for (const f of d.dosya) {
-    const btn = E("button", { class: "btn" + (f.ekli ? " ghost" : ""), type: "button" }, f.ekli ? "Yeniden işle" : "Ekle");
+    const eski = f.ekli || f.arsivde;
+    const btn = E("button", { class: "btn" + (eski ? " ghost" : ""), type: "button" }, eski ? "Yeniden işle" : "Ekle");
     btn.onclick = async () => {
+      const rel = d.yol ? d.yol + "/" + f.ad : f.ad;
       btn.disabled = true;
-      try { await api("/api/kitaplar/sunucudan", { method: "POST", body: JSON.stringify({ yol: d.yol ? d.yol + "/" + f.ad : f.ad }) });
+      if (!await oncedenSor(f.ad, rel)) { btn.disabled = false; return; }
+      try { await api("/api/kitaplar/sunucudan", { method: "POST", body: JSON.stringify({ yol: rel }) });
             btn.textContent = "Eklendi"; kitaplar(); }
       catch (e) { btn.disabled = false; alert(e.message); }
     };
-    ul.append(E("li", {}, E("span", {}, f.ad, " ", E("span", { class: "meta" }, boyut(f.boyut))), btn));
+    ul.append(E("li", {}, E("span", {}, f.ad, " ", E("span", { class: "meta" }, boyut(f.boyut) + (f.ekli ? " · Stüdyo'da" : f.arsivde ? " · arşivde (daha önce işlendi)" : ""))), btn));
   }
   if (!d.klasor.length && !d.dosya.length) ul.append(E("li", { class: "bos" }, "Bu klasörde kitap dosyası yok."));
 }
 $("#yukleBtn").onclick = async () => {
   const f = $("#dosya").files[0]; if (!f) { $("#yukleDurum").textContent = "Önce bir dosya seç."; return; }
+  if (!await oncedenSor(f.name)) { $("#yukleDurum").textContent = "Vazgeçildi."; return; }
   const fd = new FormData(); fd.append("dosya", f);
   $("#yukleBtn").disabled = true; $("#yukleDurum").textContent = "Yükleniyor…";
   try {
@@ -324,6 +333,7 @@ $("#yukleBtn").onclick = async () => {
 $("#metinBtn").onclick = async () => {
   const metin = $("#metinGovde").value.trim();
   if (metin.length < 20) { $("#metinDurum").textContent = "Metin çok kısa."; return; }
+  if (!await oncedenSor(($("#metinBaslik").value.trim() || "Metin") + ".txt")) { $("#metinDurum").textContent = "Vazgeçildi."; return; }
   $("#metinBtn").disabled = true; $("#metinDurum").textContent = "Ekleniyor…";
   try {
     await api("/api/kitaplar/metin", { method: "POST", body: JSON.stringify({ baslik: $("#metinBaslik").value.trim(), metin }) });

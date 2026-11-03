@@ -3,3 +3,7 @@ __pycache__/
 app/static/icon-*.png
 data/
 *.yedek-*
+
+# yamalar kurulduktan sonra silinir; depoya girmez
+studyo_*_yama.py
+rapor_*_yama.py

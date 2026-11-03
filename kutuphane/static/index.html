@@ -128,12 +128,24 @@ label.secim input { width: 18px; height: 18px; margin-top: 2px; flex: none; }
 
   <div class="tabs" role="tablist">
     <button role="tab" id="t-kitaplar" aria-selected="true" aria-controls="p-kitaplar">Kitaplarım</button>
+    <button role="tab" id="t-kutuphane" aria-selected="false" aria-controls="p-kutuphane">Kütüphane <span id="kutSay" style="font-weight:400;opacity:.7"></span></button>
     <button role="tab" id="t-ekle" aria-selected="false" aria-controls="p-ekle">Kitap ekle</button>
     <button role="tab" id="t-openiti" aria-selected="false" aria-controls="p-openiti">OpenITI'de ara</button>
   </div>
 
   <section id="p-kitaplar" role="tabpanel" aria-labelledby="t-kitaplar">
     <ul class="eserler" id="kitaplar"></ul>
+  </section>
+
+  <section id="p-kutuphane" role="tabpanel" aria-labelledby="t-kutuphane" hidden>
+    <div class="ara">
+      <input type="search" id="kutAra" placeholder="Kütüphane'de ara: eser ya da yazar adı" aria-label="Kütüphane'de ara" style="flex:1">
+      <select id="kutSira" aria-label="Sıralama" style="font:1rem var(--sans);padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)">
+        <option value="ad">Ada göre</option><option value="yazar">Yazara göre</option><option value="yeni">Son kaldırılan</option>
+      </select>
+    </div>
+    <p class="meta" style="margin:8px 0 0">İşlenmiş kitaplar burada durur: okunur, düzeltilir, dinlenir; seslendirme güncellemeleri sürer. "Kitaplarım" listesi kısa kalır.</p>
+    <ul class="eserler" id="kutuphane"></ul>
   </section>
 
   <section id="p-ekle" role="tabpanel" aria-labelledby="t-ekle" hidden>
@@ -221,6 +233,7 @@ for (const b of document.querySelectorAll('[role="tab"]')) {
       x.setAttribute("aria-selected", x === b); $("#" + x.getAttribute("aria-controls")).hidden = x !== b;
     }
     if (b.id === "t-openiti") $("#sorgu").focus();
+    if (b.id === "t-kutuphane") $("#kutAra").focus();
     if (b.id === "t-ekle" && !$("#gez").children.length) gez("");
   };
 }
@@ -314,7 +327,7 @@ async function gez(yol) {
             btn.textContent = "Eklendi"; kitaplar(); }
       catch (e) { btn.disabled = false; alert(e.message); }
     };
-    ul.append(E("li", {}, E("span", {}, f.ad, " ", E("span", { class: "meta" }, boyut(f.boyut) + (f.ekli ? " · Stüdyo'da" : f.arsivde ? " · arşivde (daha önce işlendi)" : ""))), btn));
+    ul.append(E("li", {}, E("span", {}, f.ad, " ", E("span", { class: "meta" }, boyut(f.boyut) + (f.kutuphanede ? " · Kütüphane'de" : f.ekli ? " · Stüdyo'da" : f.arsivde ? " · arşivde (daha önce işlendi)" : ""))), btn));
   }
   if (!d.klasor.length && !d.dosya.length) ul.append(E("li", { class: "bos" }, "Bu klasörde kitap dosyası yok."));
 }
@@ -376,6 +389,8 @@ async function kitaplar(yoklamadan = false) {
   try { liste = await api("/api/kitaplar"); } catch (e) { return; }
   try { isler = Object.fromEntries((await api("/api/jobs")).map(j => [j.id, j])); } catch (e) { isler = {}; }
   const ul = $("#kitaplar"); topluCubukKur(ul);
+  const tumu = liste; liste = tumu.filter(k => !k.kutuphanede);   // 0.5.67: Kütüphane'dekiler ayrı sekmede
+  kutuphaneCiz(tumu.filter(k => k.kutuphanede));
   const suruyor = liste.some(k => !["hazır", "hata"].includes(k.asama)) || Object.values(isler).some(j => j.status === "active");
   clearTimeout(yoklama); if (suruyor) yoklama = setTimeout(() => kitaplar(true), 3000);
   const imza = JSON.stringify([acik, [...topluSecili], liste.map(k => [k.kimlik, k.baslik, k.baslik_asil, k.yazar, k.asama, k.hata,
@@ -384,7 +399,7 @@ async function kitaplar(yoklamadan = false) {
   sonImza = imza;
   const y = window.scrollY, yeni = [];
   if (!liste.length) {
-    yeni.push(E("li", { class: "bos" }, "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
+    yeni.push(E("li", { class: "bos" }, tumu.length ? "Bütün kitaplar Kütüphane'de." : "Henüz kitap yok. \"Kitap ekle\" sekmesinden dosya ya da metin ekle."));
   }
   for (const k of liste) {
     const li = E("li", { class: k.kimlik === acik ? "acik" : "" },
@@ -520,8 +535,61 @@ async function ayrinti(kid, li) {
           kitaplar(); } catch (e) { alert(e.message); }
   };
   const okuBag = d.kunye ? E("a", { class: "btn", href: "/oku/" + encodeURIComponent(kid) }, "Oku ve düzelt") : null;
-  kutu.append(E("div", { class: "alt" }, okuBag, yeniden, kaynaktan, osm, sil));
+  const kut = d.durum.kutuphanede;   // 0.5.67
+  const kutBtn = (kut || ep.length) ? E("button", { class: "btn ghost", type: "button" }, kut ? "Kitaplarım'a geri al" : "Kütüphane'ye kaldır") : null;
+  if (kutBtn) kutBtn.onclick = async () => { kutBtn.disabled = true;
+    try { await kutuphaneye(kid, !kut); if (acik === kid) acik = null; if (kutAcik === kid) kutAcik = null; kitaplar(); }
+    catch (e) { alert(e.message); kutBtn.disabled = false; } };
+  kutu.append(E("div", { class: "alt" }, okuBag, kutBtn, yeniden, kaynaktan, osm, sil));
 }
+// ---- 0.5.67: Kütüphane (işlenmiş kitaplar; listeden kaldırılır, silinmez) ----
+const kutuphaneye = (kid, evet) => api(`/api/kitaplar/${encodeURIComponent(kid)}/kutuphane`, { method: "POST", body: JSON.stringify({ kutuphanede: evet }) });
+const aramaSade = t => (t || "").toLocaleLowerCase("tr").replace(/ı/g, "i").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\u0600-\u06ff]+/g, " ");
+let kutListe = [], kutImza = null, kutAcik = null, kutAcikKutu = null;
+const kutDinle = new Map();   // kimlik -> açık ses çalar kutusu (liste yenilenince aynı kutu kalır, ses kesilmez)
+function kutuphaneCiz(liste) {
+  if (liste) kutListe = liste;
+  $("#kutSay").textContent = kutListe.length ? `(${kutListe.length})` : "";
+  const q = aramaSade($("#kutAra").value).trim(), sira = $("#kutSira").value;
+  const ad = k => aramaSade(k.baslik || k.baslik_asil || k.kimlik);
+  let goster = kutListe.filter(k => !q || q.split(" ").every(p => (ad(k) + " " + aramaSade(k.yazar)).includes(p)));
+  goster = goster.sort(sira === "yeni" ? (a, b) => (b.kutuphanede || 0) - (a.kutuphanede || 0)
+    : sira === "yazar" ? (a, b) => aramaSade(a.yazar).localeCompare(aramaSade(b.yazar)) || ad(a).localeCompare(ad(b))
+    : (a, b) => ad(a).localeCompare(ad(b)));
+  const ses = k => k.studyo ? isler[k.studyo.is] : null;
+  const imza = JSON.stringify([q, sira, kutAcik, [...kutDinle.keys()], goster.map(k => [k.kimlik, k.baslik, k.yazar, k.asama, sesYazisi(ses(k))])]);
+  if (imza === kutImza) return;
+  kutImza = imza;
+  const ul = $("#kutuphane"), yeni = [];
+  if (!kutListe.length) yeni.push(E("li", { class: "bos" }, "Kütüphane boş. Bir kitabı açıp \"Kütüphane'ye kaldır\" de ya da Kitaplarım'da seçip toplu kaldır."));
+  else if (!goster.length) yeni.push(E("li", { class: "bos" }, "Aramaya uyan kitap yok."));
+  for (const k of goster) {
+    const j = ses(k), bitti = j && j.ok_state === "bitti";
+    const dinle = E("button", { class: "btn ghost", type: "button", "aria-expanded": kutDinle.has(k.kimlik) }, kutDinle.has(k.kimlik) ? "Sesi kapat" : "Dinle");
+    dinle.onclick = () => { kutDinle.has(k.kimlik) ? kutDinle.delete(k.kimlik) : kutDinle.set(k.kimlik, sesCalar(j.id)); kutuphaneCiz(); };
+    const ac = E("button", { class: "btn ghost", type: "button", "aria-expanded": kutAcik === k.kimlik }, kutAcik === k.kimlik ? "Kapat" : "Ayrıntı");
+    ac.onclick = () => { kutAcik = kutAcik === k.kimlik ? null : k.kimlik; kutAcikKutu = null; kutuphaneCiz(); };
+    const li = E("li", { class: kutAcik === k.kimlik ? "acik" : "" },
+      E("div", { class: "eser-ust" },
+        arapHarfli(k.baslik_asil || k.baslik) && !k.baslik ? E("div", { class: "ar", lang: "ar", dir: "rtl" }, k.baslik_asil)
+                                                          : E("div", { class: "tr-ad" }, k.baslik || k.kimlik),
+        E("div", { class: "meta" }, E("span", {}, k.yazar || ""),
+          k.asama !== "hazır" ? asamaYazisi(k) : null,
+          sesYazisi(j) ? E("span", { class: "asama" + (bitti ? " hazir" : "") }, sesYazisi(j)) : E("span", {}, "Seslendirilmedi"))),
+      E("div", { class: "sag" },
+        E("a", { class: "btn", href: "/oku/" + encodeURIComponent(k.kimlik) }, "Oku"),
+        bitti ? dinle : null, ac));
+    if (bitti && kutDinle.has(k.kimlik)) li.append(kutDinle.get(k.kimlik));
+    if (kutAcik === k.kimlik) {
+      if (kutAcikKutu) li.append(kutAcikKutu);
+      else { const [a, b] = [acikKutu, acikKid]; ayrinti(k.kimlik, li); kutAcikKutu = acikKutu; acikKutu = a; acikKid = b; }
+    }
+    yeni.push(li);
+  }
+  ul.replaceChildren(...yeni);
+}
+$("#kutAra").oninput = () => kutuphaneCiz();
+$("#kutSira").onchange = () => kutuphaneCiz();
 // ---- toplu silme (Hepsini seç / Seçilenleri sil) ----
 const topluSecili = new Set();
 let topluCubuk = null, topluCalisiyor = false, topluListe = [];
@@ -537,7 +605,10 @@ function topluCubukKur(ul) {
   dugme.onclick = topluSil;
   const dugme2 = E("button", { class: "btn ghost", type: "button", id: "topluKaynaktan" }, "Seçilenleri kaynaktan yeniden işle");
   dugme2.onclick = topluKaynaktan;
-  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme2, dugme);
+  const dugme3 = E("button", { class: "btn ghost", type: "button", id: "topluKutuphane" }, "Seçilenleri Kütüphane'ye kaldır");
+  dugme3.onclick = topluKutuphane;
+  topluCubuk.style.flexWrap = "wrap";
+  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme3, dugme2, dugme);
   ul.parentNode.insertBefore(topluCubuk, ul);
 }
 function topluGuncelle(liste) {
@@ -552,7 +623,23 @@ function topluGuncelle(liste) {
     d.disabled = !topluSecili.size;
     d.textContent = topluSecili.size ? `Seçilenleri sil (${topluSecili.size})` : "Seçilenleri sil";
     const d2 = topluCubuk.querySelector("#topluKaynaktan"); if (d2) d2.disabled = !topluSecili.size;
+    const d3 = topluCubuk.querySelector("#topluKutuphane"); if (d3) d3.disabled = !topluSecili.size;
   }
+}
+async function topluKutuphane() {   // 0.5.67
+  const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));
+  if (!secilen.length) return;
+  const d = topluCubuk.querySelector("#topluKutuphane");
+  topluCalisiyor = true; d.disabled = true;
+  let atlanan = 0;
+  for (let i = 0; i < secilen.length; i++) {
+    d.textContent = `Kaldırılıyor ${i + 1}/${secilen.length}…`;
+    try { await kutuphaneye(secilen[i].kimlik, true); topluSecili.delete(secilen[i].kimlik); if (acik === secilen[i].kimlik) acik = null; }
+    catch (e) { atlanan++; }
+  }
+  topluCalisiyor = false; d.textContent = "Seçilenleri Kütüphane'ye kaldır";
+  if (atlanan) alert(`${atlanan} kitap kaldırılmadı: henüz işlenmemiş (EPUB'u yok).`);
+  kitaplar();
 }
 async function topluKaynaktan() {
   const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));

@@ -86,7 +86,7 @@ def liste():
         d = durum_oku(kid)
         out.append({"kimlik": kid, **{k: d.get(k) for k in ("baslik", "baslik_asil", "yazar", "asama", "hata", "uyari", "guncellendi",
                                                             "cikti", "cikti_uyari", "studyo", "studyo_uyari",
-                                                            "eklendi", "epublar", "denetim")}})
+                                                            "eklendi", "epublar", "denetim", "kutuphanede")}})
     return sorted(out, key=lambda x: -(x.get("eklendi") or 0))
 
 

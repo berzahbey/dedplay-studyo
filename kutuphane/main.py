@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.66"
+SURUM = "0.5.67"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -90,7 +90,7 @@ def openiti_ekle(g: OpenitiEkle):
                  baslik=ilk.get("baslik") or satir["title_ar"].split("::")[0].strip(),
                  baslik_asil=satir["title_ar"].split("::")[0].strip(),
                  yazar=ilk.get("yazar") or satir["author_ar"].split("::")[0].strip(),
-                 eklendi=ilk.get("eklendi") or int(time.time()))
+                 eklendi=ilk.get("eklendi") or int(time.time()), kutuphanede=None)   # 0.5.67: yeniden verilen kitap listeye döner
     return {"ok": True, "kimlik": kid}
 
 
@@ -116,10 +116,12 @@ def kaynak_gez(yol: str = ""):
             klasor.append(ad)
         elif ad.lower().endswith(UZANTILAR):
             dosya.append({"ad": ad, "boyut": os.path.getsize(p)})
-    ekli = {k["kimlik"] for k in depo.liste()}
+    ekli = {k["kimlik"]: bool(k.get("kutuphanede")) for k in depo.liste()}
     dizin = arsiv.cikti_dizini() if dosya else []
     for f in dosya:
-        f["ekli"] = kaynak.kimlik_uret(os.path.join(tam, f["ad"])) in ekli
+        kid = kaynak.kimlik_uret(os.path.join(tam, f["ad"]))
+        f["ekli"] = kid in ekli
+        f["kutuphanede"] = ekli.get(kid, False)   # 0.5.67
         f["arsivde"] = not f["ekli"] and arsiv.bul(f["ad"], dizin) is not None   # 0.5.66: daha önce işlenmiş
     return {"yol": os.path.relpath(tam, KAYNAK) if tam != os.path.realpath(KAYNAK) else "", "klasor": klasor, "dosya": dosya}
 
@@ -148,7 +150,7 @@ def _dosya_isi(yol, gorunen_ad):
     baslik, yazar = kaynak._dosya_adindan(gorunen_ad)
     depo.is_ekle("dosya", kid, yol, tur="dosya", kaynak_kimlik=yol, baslik=ilk.get("baslik") or baslik,
                  baslik_asil=ilk.get("baslik_asil") or baslik, yazar=ilk.get("yazar") or yazar,
-                 eklendi=ilk.get("eklendi") or int(time.time()))
+                 eklendi=ilk.get("eklendi") or int(time.time()), kutuphanede=None)   # 0.5.67: yeniden verilen kitap listeye döner
     return {"ok": True, "kimlik": kid}
 
 
@@ -166,8 +168,9 @@ def arsiv_kontrol(ad: str, yol: str = ""):
     if kid:
         d = depo.durum_oku(kid)
         b = d.get("baslik") or os.path.splitext(ad)[0]
-        return {"var": True, "nerede": "studyo", "kimlik": kid,
-                "mesaj": f"“{b}” Stüdyo'da zaten var (aşama: {d.get('asama') or '?'}).\n"
+        yer = "Kütüphane'de zaten var" if d.get("kutuphanede") else f"Stüdyo'da zaten var (aşama: {d.get('asama') or '?'})"
+        return {"var": True, "nerede": "kutuphane" if d.get("kutuphanede") else "studyo", "kimlik": kid,
+                "mesaj": f"“{b}” {yer}.\n"
                          "Yeniden verilirse aynı kitap baştan işlenir. Yeniden işlensin mi?"}
     iz = arsiv.bul(ad)
     if iz:
@@ -410,6 +413,24 @@ def kitap_sil(kid: str, dosyalar: bool = False):
             print(f"Stüdyo işi {is_no} silinemedi: {type(e).__name__}: {e}", flush=True)
     # 0.5.19: sırada bekleyen kitap hemen silinir; işi çalışan kitabın işi durdurulup kitap ardından silinir
     return {"ok": True, "durum": depo.sil_iste(kid), "silinen": silinen}
+
+
+class KutuphaneIstegi(BaseModel):
+    kutuphanede: bool = True
+
+
+@app.post("/api/kitaplar/{kid}/kutuphane")
+def kutuphaneye(kid: str, g: KutuphaneIstegi):
+    """0.5.67: işlenmiş kitap "Kitaplarım" listesinden Kütüphane'ye kaldırılır (ya da geri alınır). Kitap silinmez:
+    okuma, düzeltme, dinleme ve seslendirme güncellemeleri aynen sürer; yalnız liste kısalır."""
+    import time
+    d = depo.durum_oku(kid) if depo.KIMLIK.match(kid) else None
+    if not d:
+        raise HTTPException(404, "Böyle bir kitap yok")
+    if g.kutuphanede and not d.get("epublar"):
+        raise HTTPException(409, "Kitap henüz işlenmedi: yalnız işlenmiş kitaplar Kütüphane'ye kaldırılabilir")
+    depo.durum_yaz(kid, kutuphanede=int(time.time()) if g.kutuphanede else None)
+    return {"ok": True, "kutuphanede": g.kutuphanede}
 
 
 @app.post("/api/kitaplar/{kid}/studyo")

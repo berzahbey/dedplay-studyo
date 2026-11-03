@@ -360,6 +360,26 @@ $("#metinBtn").onclick = async () => {
 const arapHarfli = s => /[\u0600-\u06FF]/.test(s || "");
 const sureYaz = sn => { const sa = Math.floor(sn / 3600), dk = Math.round((sn % 3600) / 60); return sa ? `${sa} sa ${dk} dk` : `${Math.max(1, dk)} dk`; };
 let isler = {};   // Stüdyo işleri (seslendirme durumu), id -> iş
+// 0.5.69: dinleme hızı 0,1 adımla (0,5–2,0); okuma ekranıyla aynı ayar (tarayıcıda saklanır)
+let sesHiz = (() => { try { return JSON.parse(localStorage.getItem("ses:hiz")) || 1; } catch (e) { return 1; } })();
+function hizCubugu(kutu) {
+  const yaz = E("span", { style: "min-width:3.2em;text-align:center;font-weight:600;font-variant-numeric:tabular-nums", "aria-live": "polite" });
+  const az = E("button", { class: "btn ghost", type: "button", "aria-label": "Yavaşlat (0,1)", style: "padding:4px 12px" }, "−");
+  const cok = E("button", { class: "btn ghost", type: "button", "aria-label": "Hızlandır (0,1)", style: "padding:4px 12px" }, "+");
+  const uygula = () => {
+    for (const a of kutu.querySelectorAll("audio")) { a.defaultPlaybackRate = a.playbackRate = sesHiz; a.preservesPitch = true; }
+    yaz.textContent = sesHiz.toFixed(1).replace(".", ",") + "×"; az.disabled = sesHiz <= 0.5; cok.disabled = sesHiz >= 2;
+  };
+  const degis = d => { sesHiz = Math.round(Math.min(2, Math.max(0.5, sesHiz + d)) * 10) / 10;
+    try { localStorage.setItem("ses:hiz", JSON.stringify(sesHiz)); } catch (e) {}
+    for (const c of document.querySelectorAll(".hiz-cubugu")) c._uygula(); };
+  az.onclick = () => degis(-0.1); cok.onclick = () => degis(0.1);
+  const cubuk = E("div", { class: "hiz-cubugu meta", style: "display:flex;align-items:center;gap:8px;margin:6px 0", role: "group", "aria-label": "Dinleme hızı" }, "Hız", az, yaz, cok);
+  cubuk._uygula = uygula;
+  kutu.addEventListener("loadedmetadata", uygula, true); kutu.addEventListener("play", uygula, true);
+  kutu.prepend(cubuk); uygula();
+  return kutu;
+}
 function sesCalar(id) {   // M4B'yi tarayıcıda çalar (büyük kitapta birden çok parça)
   const kutu = E("div", { class: "ses" });
   api(`/api/jobs/${id}/dinle-parcalar`).then(v => {
@@ -367,6 +387,7 @@ function sesCalar(id) {   // M4B'yi tarayıcıda çalar (büyük kitapta birden 
     for (let i = 0; i < v.parca; i++)
       kutu.append(E("div", {}, v.parca > 1 ? E("p", { class: "meta" }, `Kısım ${i + 1}`) : null,
         E("audio", { controls: "", preload: "metadata", src: `/api/jobs/${id}/dinle?part=${i}`, style: "width:100%" })));
+    hizCubugu(kutu);
   }).catch(() => kutu.append(E("p", { class: "meta" }, "Ses bilgisi alınamadı.")));
   return kutu;
 }
@@ -555,7 +576,7 @@ function rafSesCalar(yollar) {
   const kutu = E("div", { class: "ses" });
   yollar.forEach((y, i) => kutu.append(E("div", {}, yollar.length > 1 ? E("p", { class: "meta" }, `Kısım ${i + 1}`) : null,
     E("audio", { controls: "", preload: "metadata", src: "/api/raf/dosya?yol=" + encodeURIComponent(y), style: "width:100%" }))));
-  return kutu;
+  return hizCubugu(kutu);
 }
 function kutuphaneCiz() {
   $("#kutSay").textContent = rafListe.length ? `(${rafListe.length})` : "";
@@ -627,10 +648,8 @@ function topluCubukKur(ul) {
   dugme.onclick = topluSil;
   const dugme2 = E("button", { class: "btn ghost", type: "button", id: "topluKaynaktan" }, "Seçilenleri kaynaktan yeniden işle");
   dugme2.onclick = topluKaynaktan;
-  const dugme3 = E("button", { class: "btn ghost", type: "button", id: "topluKutuphane" }, "Seçilenleri Kütüphane'ye kaldır");
-  dugme3.onclick = topluKutuphane;
   topluCubuk.style.flexWrap = "wrap";
-  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme3, dugme2, dugme);
+  topluCubuk.append(E("label", { style: "display:flex;align-items:center;gap:6px;cursor:pointer" }, hepsi, "Hepsini seç"), dugme2, dugme);
   ul.parentNode.insertBefore(topluCubuk, ul);
 }
 function topluGuncelle(liste) {
@@ -645,23 +664,7 @@ function topluGuncelle(liste) {
     d.disabled = !topluSecili.size;
     d.textContent = topluSecili.size ? `Seçilenleri sil (${topluSecili.size})` : "Seçilenleri sil";
     const d2 = topluCubuk.querySelector("#topluKaynaktan"); if (d2) d2.disabled = !topluSecili.size;
-    const d3 = topluCubuk.querySelector("#topluKutuphane"); if (d3) d3.disabled = !topluSecili.size;
   }
-}
-async function topluKutuphane() {   // 0.5.67
-  const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));
-  if (!secilen.length) return;
-  const d = topluCubuk.querySelector("#topluKutuphane");
-  topluCalisiyor = true; d.disabled = true;
-  let atlanan = 0;
-  for (let i = 0; i < secilen.length; i++) {
-    d.textContent = `Kaldırılıyor ${i + 1}/${secilen.length}…`;
-    try { await kutuphaneye(secilen[i].kimlik, true); topluSecili.delete(secilen[i].kimlik); if (acik === secilen[i].kimlik) acik = null; }
-    catch (e) { atlanan++; }
-  }
-  topluCalisiyor = false; d.textContent = "Seçilenleri Kütüphane'ye kaldır";
-  if (atlanan) alert(`${atlanan} kitap kaldırılmadı: henüz işlenmemiş (EPUB'u yok).`);
-  kitaplar();
 }
 async function topluKaynaktan() {
   const secilen = topluListe.filter(k => topluSecili.has(k.kimlik));

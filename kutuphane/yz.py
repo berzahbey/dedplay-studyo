@@ -349,6 +349,9 @@ def sahte_cevap(kullanici):
                            for no, s in maddeler])
     if "SATIR GÖREVİ" in kullanici:
         return json.dumps([{"no": int(no), "tur": "kaynak" if "a.g.e" in s else "ana_metin"} for no, s in maddeler])
+    if "KÖKEN GÖREVİ" in kullanici:
+        return json.dumps([{"no": int(no), "koken": "tr", "kok": s.strip(), "yazilis": "", "okunus": "", "anlam": ""}
+                           for no, s in maddeler], ensure_ascii=False)
     if "SAYI GÖREVİ" in kullanici:
         return json.dumps([{"no": int(no), "dipnot_isareti": True} for no, _ in maddeler])
     return "[]"

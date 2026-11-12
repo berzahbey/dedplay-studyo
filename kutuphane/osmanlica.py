@@ -131,6 +131,12 @@ def kitabi_cevir(kit, ilerleme=None, zorla=False):
         tr = kit["kunye"].get(alan, {}).get("tr")
         if tr:
             ekle(tr, lambda v, a=alan: kit["kunye"][a].__setitem__("osm", v))
+    try:   # 0.5.71: bilinmeyen kelimelerin kökeni yapay zekâya bir kez sorulur, çevirici kaydeder (adım hata verirse çeviri sürer)
+        from . import koken
+        kit["kunye"]["koken"] = koken.kokenleri_sor(tum, ilerleme)
+    except Exception as e:   # noqa: BLE001
+        if ilerleme:
+            ilerleme(f"Köken adımı atlandı: {type(e).__name__}")
     cevrilmis = liste_cevir(tum, ilerleme)
     for yerlestir, sablon, bas, adet in isler:
         yerlestir(_birlestir(sablon, cevrilmis[bas:bas + adet]))

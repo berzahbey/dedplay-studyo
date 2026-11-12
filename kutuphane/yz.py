@@ -213,6 +213,7 @@ class Gemini:
         self._ad = None
         self.zaman = 240          # 0.5.72: tek isteğin zaman aşımı (köken adımı daha kısa tutar)
         self.deneme = 10
+        self.json_kipi = True     # 0.5.73: köken adımında kapalı (JSON kipinde gemini-3.5-flash-lite 503 veriyordu, düz metinde 200)
 
     @property
     def ad(self):
@@ -244,8 +245,9 @@ class Gemini:
     def _gemini(self, sistem, kullanici, en_fazla):
         govde = {"systemInstruction": {"parts": [{"text": sistem}]},
                  "contents": [{"role": "user", "parts": [{"text": kullanici}]}],
-                 "generationConfig": {"temperature": 0, "responseMimeType": "application/json",
-                                      "maxOutputTokens": max(1024, en_fazla * 2)}}
+                 "generationConfig": {"temperature": 0, "maxOutputTokens": max(1024, en_fazla * 2)}}
+        if self.json_kipi:
+            govde["generationConfig"]["responseMimeType"] = "application/json"
         for deneme in range(self.deneme):
             model = self.ad[7:]
             _bekle_dakika(model)
@@ -281,7 +283,9 @@ class Gemini:
                 self.sayac["bekleme"] += min(bekle, 90)
                 continue
             if r.status_code in (500, 502, 503, 504):
+                self.ilerleme(f"{model} şu an yoğun ({r.status_code}); bekleniyor")
                 time.sleep(10 * (deneme + 1))
+                self.sayac["bekleme"] += 10 * (deneme + 1)
                 continue
             if r.status_code == 404 or (r.status_code == 400 and "no longer available" in r.text):
                 # 0.5.56: model listede görünüyor ama hesaba kapalı (Tahrif 3, 31 Ekim: gemini-2.5-flash-lite "no longer available

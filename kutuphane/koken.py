@@ -96,7 +96,7 @@ def kokenleri_sor(metinler, ilerleme=None):
         if dur.is_set():
             return
         g = yz.Gemini(lambda m: None)
-        g.zaman, g.deneme = 120, 3
+        g.zaman, g.deneme, g.json_kipi = 120, 5, False   # 0.5.73: düz metin (JSON kipi 503); cevaptaki dizi json_al ile okunur
         kullanici = "KÖKEN GÖREVİ\n" + "\n".join(f"{n}. {w}" for n, w in enumerate(grup, 1))
         try:
             cevap, model = g.sor(SISTEM, kullanici, en_fazla=2500)

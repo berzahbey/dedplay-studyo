@@ -4,12 +4,19 @@
 okunuşu ve kısa Türkçe karşılığı. Cevaplar çeviriciye yazılır (/api/yz-kayit); çevirici denetler (harf uyumu), kalıcı kaydeder ve
 sözlük gibi kullanır. Her kelime bir kez sorulur. Yapay zekâ Osmanlıca yazmaz: yazımı çeviricinin sözlük ve kuralları yapar.
 Yapay zekâ kapalıysa, günlük sınır dolduysa ya da çevirici eski sürümse adım atlanır; çeviri her durumda sürer."""
+import concurrent.futures
+import logging
+import threading
+
 import requests
 
 from . import yz
+
+log = logging.getLogger("koken")
 from .osmanlica import URL
 
-GRUP = 150
+GRUP = 40          # 0.5.72: 150 kelimelik cevap çok uzun sürüyordu (zaman aşımı); 40'lık gruplar, 3'ü aynı anda
+ES_ZAMANLI = 3
 
 SISTEM = """Sen Türkçe metinlerdeki kelimelerin kökenini belirleyen bir dil uzmanısın. Sana Türkçe bir kitaptan kelimeler verilecek;
 kelimelere Türkçe ekler gelmiş olabilir. Her kelime için kökünün dilini ve gerekli bilgiyi ver. Yalnız JSON dizisi döndür:
@@ -67,7 +74,9 @@ def cevaplari_coz(kelimeler, cevap, model=""):
 
 
 def kokenleri_sor(metinler, ilerleme=None):
-    """Çeviriden önce: bilinmeyen kelimeleri yapay zekâya sorar ve çeviriciye kaydeder. Dönen: özet sözlüğü."""
+    """Çeviriden önce: bilinmeyen kelimeleri yapay zekâya sorar ve çeviriciye kaydeder. Dönen: özet sözlüğü.
+    0.5.72: 40'lık gruplar, aynı anda 3 istek (dakika sınırı yz modülünde ortak sayılır); grup cevapsız kalırsa atlanır
+    (o kelimeler sonraki çeviride yeniden sorulur); her grup günlüğe yazılır."""
     ilerleme = ilerleme or (lambda m: None)
     ozet = {"bilinmeyen": 0, "soruldu": 0, "onayli": 0, "kontrol": 0, "durum": "atlandi"}
     if not yz.acik():
@@ -76,28 +85,44 @@ def kokenleri_sor(metinler, ilerleme=None):
     if kelimeler is None:
         return ozet
     ozet["bilinmeyen"] = len(kelimeler)
+    log.warning("köken: %d bilinmeyen kelime", len(kelimeler))
     if not kelimeler:
         ozet["durum"] = "tamam"
         return ozet
-    g = yz.Gemini(ilerleme)
-    for i in range(0, len(kelimeler), GRUP):
-        grup = kelimeler[i:i + GRUP]
-        ilerleme(f"Kelime kökenleri soruluyor: {i + len(grup)}/{len(kelimeler)}")
+    gruplar = [kelimeler[i:i + GRUP] for i in range(0, len(kelimeler), GRUP)]
+    kilit, dur = threading.Lock(), threading.Event()
+
+    def sor(grup):
+        if dur.is_set():
+            return
+        g = yz.Gemini(lambda m: None)
+        g.zaman, g.deneme = 120, 3
         kullanici = "KÖKEN GÖREVİ\n" + "\n".join(f"{n}. {w}" for n, w in enumerate(grup, 1))
         try:
-            cevap, model = g.sor(SISTEM, kullanici, en_fazla=6000)
+            cevap, model = g.sor(SISTEM, kullanici, en_fazla=2500)
         except yz.GunlukSinir:
-            ozet["durum"] = "gunluk_sinir"
-            ilerleme("Yapay zekâ günlük sınırı doldu; kalan kelimeler sonraki çeviride sorulacak")
-            return ozet
-        except yz.GeciciHata:
-            ozet["durum"] = "gecici_hata"
-            return ozet
+            dur.set()
+            with kilit:
+                ozet["durum"] = "gunluk_sinir"
+            return
+        except Exception as e:      # noqa: BLE001  geçici hata: bu grup sonraki çeviride yeniden sorulur
+            log.warning("köken: grup cevapsız (%s)", type(e).__name__)
+            return
         kayitlar = cevaplari_coz(grup, cevap, model)
-        if kayitlar:
-            s = _kaydet(kayitlar)
+        s = _kaydet(kayitlar) if kayitlar else {}
+        with kilit:
+            ozet["soruldu"] += len(grup)
             ozet["onayli"] += s.get("onayli", 0)
             ozet["kontrol"] += s.get("kontrol", 0)
-        ozet["soruldu"] += len(grup)
-    ozet["durum"] = "tamam"
+            log.warning("köken: %d/%d soruldu (grup %d kelime, %d cevap, model %s)", ozet["soruldu"], len(kelimeler),
+                        len(grup), len(kayitlar), model)
+            ilerleme(f"Kelime kökenleri soruluyor: {ozet['soruldu']}/{len(kelimeler)}")
+
+    ilerleme(f"Kelime kökenleri soruluyor: 0/{len(kelimeler)}")
+    with concurrent.futures.ThreadPoolExecutor(ES_ZAMANLI) as ex:
+        list(ex.map(sor, gruplar))
+    if ozet["durum"] != "gunluk_sinir":
+        ozet["durum"] = "tamam"
+    else:
+        ilerleme("Yapay zekâ günlük sınırı doldu; kalan kelimeler sonraki çeviride sorulacak")
     return ozet

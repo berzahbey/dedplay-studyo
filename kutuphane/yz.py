@@ -211,6 +211,8 @@ class Gemini:
         self.kullanilan = collections.Counter()
         self.sahte = bool(os.environ.get("STUDYO_YZ_SAHTE"))
         self._ad = None
+        self.zaman = 240          # 0.5.72: tek isteğin zaman aşımı (köken adımı daha kısa tutar)
+        self.deneme = 10
 
     @property
     def ad(self):
@@ -244,11 +246,11 @@ class Gemini:
                  "contents": [{"role": "user", "parts": [{"text": kullanici}]}],
                  "generationConfig": {"temperature": 0, "responseMimeType": "application/json",
                                       "maxOutputTokens": max(1024, en_fazla * 2)}}
-        for deneme in range(10):
+        for deneme in range(self.deneme):
             model = self.ad[7:]
             _bekle_dakika(model)
             try:
-                r = _istek(f"models/{model}:generateContent", govde, zaman=240)
+                r = _istek(f"models/{model}:generateContent", govde, zaman=self.zaman)
             except Exception as e:      # 0.5.57: zaman aşımı/bağlantı hatası denemeyi bitirmez (31 Ekim: 18 kitapta ReadTimeout)
                 import requests
                 if not isinstance(e, requests.RequestException):
@@ -289,7 +291,7 @@ class Gemini:
                 self.ilerleme(f"{model} kullanılamıyor (Google kapatmış); sıradaki modele geçiliyor")
                 continue
             raise RuntimeError(f"Gemini hatası {r.status_code}: {r.text[:300]}")
-        raise GeciciHata("Gemini cevap vermedi (10 deneme)")
+        raise GeciciHata(f"Gemini cevap vermedi ({self.deneme} deneme)")
 
 
 def dene(anahtar=None):

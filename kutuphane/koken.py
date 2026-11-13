@@ -16,7 +16,8 @@ from . import yz
 log = logging.getLogger("koken")
 from .osmanlica import URL
 
-GRUP = 40          # 0.5.72: 150 kelimelik cevap çok uzun sürüyordu (zaman aşımı); 40'lık gruplar, 3'ü aynı anda
+GRUP = 100         # 0.5.75: güçlü modelin günlük istek sınırı küçük (~8-10): istek başına 100 kelime (hydrogen 35 kelimeyi 17 sn'de verdi)
+# 0.5.72: 150 kelimelik cevap çok uzun sürüyordu (zaman aşımı); 40'lık gruplar, 3'ü aynı anda
 ES_ZAMANLI = 3
 # 0.5.74 (13 Kasım 2026, model denemesi, 35 kelime): Flash-Lite Türkçe kelimeleri Arapça sayıp yazılış yerine anlamdaş veriyordu;
 # gemini-4-hydrogen (17 sn) ve gemini-3.5-flash (111 sn) 25 Türkçe kelimeyi tr, 10 Arapça/Farsça kelimenin yazılışını doğru verdi.
@@ -101,11 +102,11 @@ def kokenleri_sor(metinler, ilerleme=None):
         if dur.is_set():
             return
         g = yz.Gemini(lambda m: None)
-        g.zaman, g.deneme, g.json_kipi = 150, 5, False   # 0.5.73: düz metin (JSON kipi 503); cevaptaki dizi json_al ile okunur
+        g.zaman, g.deneme, g.json_kipi = 240, 5, False   # 0.5.73: düz metin (JSON kipi 503); cevaptaki dizi json_al ile okunur
         g.liste = MODELLER                                # 0.5.74: Flash-Lite kullanılmaz
         kullanici = "KÖKEN GÖREVİ\n" + "\n".join(f"{n}. {w}" for n, w in enumerate(grup, 1))
         try:
-            cevap, model = g.sor(SISTEM, kullanici, en_fazla=2500)
+            cevap, model = g.sor(SISTEM, kullanici, en_fazla=6000)
         except yz.GunlukSinir:
             dur.set()
             with kilit:

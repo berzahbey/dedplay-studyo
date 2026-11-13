@@ -3626,16 +3626,23 @@ def _epub_fihristi(book, belgeler):
     Döndürür {'bloklar': {id(blok): (seviye, başlık, önüne_ekle)}, 'ilk_belge': sıra} ya da None (fihrist yok/yetersiz)."""
     duz = []
 
-    def gez(ogeler, derinlik):
-        for o in ogeler:
-            if isinstance(o, tuple):
-                bas, alt = o
-                if getattr(bas, "href", None):
-                    duz.append((derinlik, bas.title, bas.href))
-                gez(alt, derinlik + 1)
-            elif getattr(o, "href", None):
-                duz.append((derinlik, o.title, o.href))
-    gez(book.toc or [], 0)
+    def gez(x, derinlik):
+        # 0.5.77: ebooklib fihristi her zaman (başlık, [alt liste]) vermiyor; alt kısım tek bir Link de olabiliyor
+        # (13 Kasım: Alemlerin Kapısı, Fusûsu'l-Hikem Anahtarları -> "TypeError: 'Link' object is not iterable"). Her biçim kabul edilir.
+        if isinstance(x, list):
+            for o in x:
+                gez(o, derinlik)
+        elif isinstance(x, tuple):
+            if x:
+                gez(x[0], derinlik)
+                for alt in x[1:]:
+                    gez(alt, derinlik + 1)
+        elif getattr(x, "href", None):
+            duz.append((derinlik, getattr(x, "title", "") or "", x.href))
+    try:
+        gez(book.toc or [], 0)
+    except Exception:       # noqa: BLE001  fihrist okunamazsa kitap durmaz: fihristsiz yol kullanılır
+        return None
     duz = [(d, TS.norm(t or ""), h) for d, t, h in duz if (t or "").strip()]
     if len(duz) < 2:
         return None

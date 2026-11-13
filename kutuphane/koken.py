@@ -38,6 +38,8 @@ Kurallar:
 - Batı dilleri ve öteki diller: "okunus" kelimenin (eksiz kökün) aslındaki okunuşunun Türkçe harflerle yazımı:
   Charakter -> Karakter, Robespierre -> Robespiyer, Cambridge -> Keymbriç, caritas -> karitas, kültür -> kültür.
 - Kişi ve yer adları da aynı kurala göre: Türk adı tr; Arap/Fars adı ar/fa + yazılış; Batılı ad dil + okunuş.
+  Batılı özel adda ayrıca "yazilis": Osmanlı matbuatındaki Arap harfli yazılışı (Schopenhauer -> شوپنهاور, Kant -> قانت,
+  Paris -> پاریس, Hegel -> هگل).
 - anlam: kısa Türkçe karşılık (en çok 5 kelime); özel adda "kişi adı" / "yer adı".
 - Listedeki bazı öğeler eksiz kök (sakin, surat, kırbaç) ya da özel addır (Halime, Huzistan); onlar için de aynı kurallar.
 - Her kelime için bir nesne ver; "no" verilen numara olsun."""

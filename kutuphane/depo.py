@@ -5,6 +5,7 @@
 /data/kitaplar/<kimlik>/kaynak.txt   indirilen asıl metin (yeniden okumak için)
 /data/kitaplar/<kimlik>/epub/*.epub
 """
+import itertools
 import json
 import os
 import queue
@@ -25,8 +26,36 @@ VERI = os.environ.get("DATA_DIR", "/data")
 KITAPLAR = os.path.join(VERI, "kitaplar")
 KIMLIK = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 DIL_AD = {"ar": "arapca", "en": "ingilizce", "fr": "fransizca", "fa": "farsca"}
-_kuyruk = queue.Queue()  # hafif şerit (0.5.17): EPUB/DOCX/TXT, katmanlı ya da önbellekteki PDF, Osmanlıca, EPUB işleri
-_kuyruk_agir = queue.Queue()  # ağır şerit: OCR gerektiren PDF'ler, birer birer (Surya bütün işlemciyi kullanır)
+class _KucukOnce(queue.PriorityQueue):
+    """0.5.78: kuyruk küçük kitabı öne alır (Zahir'in isteği: verilme zamanına göre değil, kelime sayısı az olan önce; daha çok kitap
+    daha çabuk biter). Ölçü kitap.json'un büyüklüğü (≈ metin uzunluğu); yoksa kaynak dosyanın. Eşitse ekleniş sırası.
+    Arayüz queue.Queue ile aynı: put((tur, kid, arg, nesil)), get() aynı demeti döndürür."""
+
+    def __init__(self):
+        super().__init__()
+        self._sira = itertools.count()
+
+    def put(self, item, block=True, timeout=None):
+        super().put((_boyut(item), next(self._sira), item), block, timeout)
+
+    def get(self, block=True, timeout=None):
+        return super().get(block, timeout)[2]
+
+
+def _boyut(item):
+    _tur, kid, arg, _nesil = item
+    for yol in (lambda: kitap_yolu(kid), lambda: arg if isinstance(arg, str) else None):
+        try:
+            y = yol()
+            if y and os.path.isfile(y):
+                return os.path.getsize(y)
+        except (OSError, ValueError):
+            continue
+    return 0
+
+
+_kuyruk = _KucukOnce()  # hafif şerit (0.5.17): EPUB/DOCX/TXT, katmanlı ya da önbellekteki PDF, Osmanlıca, EPUB işleri
+_kuyruk_agir = _KucukOnce()  # ağır şerit: OCR gerektiren PDF'ler, birer birer (Surya bütün işlemciyi kullanır)
 _is_kilitleri = {}  # aynı kitabın iki işi aynı anda çalışmasın
 _kilit = threading.Lock()
 _kitap_kilitleri = {}
@@ -254,7 +283,7 @@ def _studyoya_zincirle(kid, guncelle=False, yalniz_var_olan=False, elle=False):
 
 
 # ======================= 0.5.53: yapay zekâ denetimi =======================
-_kuyruk_den = queue.Queue()
+_kuyruk_den = _KucukOnce()
 DENETIM_SERIT = int(os.environ.get("STUDYO_DENETIM_SERIT", "3"))
 
 

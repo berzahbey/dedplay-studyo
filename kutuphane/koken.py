@@ -39,6 +39,7 @@ Kurallar:
   Charakter -> Karakter, Robespierre -> Robespiyer, Cambridge -> Keymbriç, caritas -> karitas, kültür -> kültür.
 - Kişi ve yer adları da aynı kurala göre: Türk adı tr; Arap/Fars adı ar/fa + yazılış; Batılı ad dil + okunuş.
 - anlam: kısa Türkçe karşılık (en çok 5 kelime); özel adda "kişi adı" / "yer adı".
+- Listedeki bazı öğeler eksiz kök (sakin, surat, kırbaç) ya da özel addır (Halime, Huzistan); onlar için de aynı kurallar.
 - Her kelime için bir nesne ver; "no" verilen numara olsun."""
 
 
@@ -94,7 +95,7 @@ def kokenleri_sor(metinler, ilerleme=None):
     if kelimeler is None:
         return ozet
     ozet["bilinmeyen"] = len(kelimeler)
-    log.warning("köken: %d bilinmeyen kelime", len(kelimeler))
+    log.warning("köken: %d soru (kök başına; özel adlar ve sık geçenler önce)", len(kelimeler))
     if not kelimeler:
         ozet["durum"] = "tamam"
         return ozet
@@ -111,9 +112,11 @@ def kokenleri_sor(metinler, ilerleme=None):
         try:
             cevap, model = g.sor(SISTEM, kullanici, en_fazla=6000)
         except yz.GunlukSinir:
-            dur.set()
             with kilit:
+                if not dur.is_set():      # 0.5.78: kota dolunca günlüğe yazılır (eskiden sessizce atlanıyordu)
+                    log.warning("köken: günlük sınır doldu; %d/%d soruldu, kalanlar sonraki çeviride", ozet["soruldu"], len(kelimeler))
                 ozet["durum"] = "gunluk_sinir"
+            dur.set()
             return
         except Exception as e:      # noqa: BLE001  geçici hata: bu grup sonraki çeviride yeniden sorulur
             log.warning("köken: grup cevapsız (%s)", type(e).__name__)

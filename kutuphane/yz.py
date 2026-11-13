@@ -228,6 +228,7 @@ class Gemini:
         self.sayac = {"cagri": 0, "giris": 0, "cikis": 0, "sure": 0.0, "bekleme": 0.0}
         self.kullanilan = collections.Counter()
         self.sahte = bool(os.environ.get("STUDYO_YZ_SAHTE"))
+        self.son_bitis = ""         # 0.5.76: son cevabın finishReason'ı (köken günlüğünde teşhis için)
         self._ad = None
         self.zaman = 240          # 0.5.72: tek isteğin zaman aşımı (köken adımı daha kısa tutar)
         self.deneme = 10
@@ -294,6 +295,10 @@ class Gemini:
                 self.sayac["giris"] += u.get("promptTokenCount", 0)
                 self.sayac["cikis"] += u.get("candidatesTokenCount", 0)
                 try:
+                    self.son_bitis = str((d.get("candidates") or [{}])[0].get("finishReason") or "")
+                except (AttributeError, IndexError):
+                    self.son_bitis = ""
+                try:
                     return "".join(p.get("text", "") for p in d["candidates"][0]["content"]["parts"]), model
                 except (KeyError, IndexError):
                     return "", model       # güvenlik filtresi vb.: bu grup cevapsız kalır (sonra yeniden sorulur)
@@ -356,6 +361,25 @@ def json_al(metin):
             except ValueError:
                 continue
     return None
+
+
+def json_nesneleri(metin):
+    """0.5.76: kesik (yarım kalmış) JSON dizisinden tam olan {...} nesnelerini tek tek okur.
+    Cevap çıkış sınırında kesilince json_al hiçbir şey döndürmüyordu; böylece grubun cevaplanan kısmı kurtarılır."""
+    metin, out, i = metin or "", [], 0
+    coz = json.JSONDecoder()
+    while True:
+        i = metin.find("{", i)
+        if i < 0:
+            return out
+        try:
+            nesne, j = coz.raw_decode(metin, i)
+        except ValueError:
+            i += 1
+            continue
+        if isinstance(nesne, dict):
+            out.append(nesne)
+        i = j
 
 
 # ---------------------------------------------------------------- sınama için sahte model

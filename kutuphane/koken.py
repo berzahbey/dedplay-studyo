@@ -62,7 +62,10 @@ def _kaydet(kayitlar):
 def cevaplari_coz(kelimeler, cevap, model=""):
     """Gemini cevabını (JSON dizisi) çeviricinin kayıt biçimine çevirir; numarası tutmayan / boş olanlar atlanır."""
     out = []
-    for d in (yz.json_al(cevap) or []):
+    dizi = yz.json_al(cevap)
+    if not isinstance(dizi, list):      # 0.5.76: cevap kesikse tam nesneleri tek tek kurtar
+        dizi = yz.json_nesneleri(cevap)
+    for d in dizi:
         if not isinstance(d, dict):
             continue
         try:
@@ -116,6 +119,9 @@ def kokenleri_sor(metinler, ilerleme=None):
             log.warning("köken: grup cevapsız (%s)", type(e).__name__)
             return
         kayitlar = cevaplari_coz(grup, cevap, model)
+        if len(kayitlar) < len(grup) * 0.9:     # 0.5.76: eksik/boş cevabın nedeni günlüğe (MAX_TOKENS, SAFETY, ...)
+            log.warning("köken: eksik cevap (%d/%d, bitiş %s, %d karakter, sonu: %r)", len(kayitlar), len(grup),
+                        g.son_bitis or "?", len(cevap or ""), (cevap or "")[-80:])
         s = _kaydet(kayitlar) if kayitlar else {}
         with kilit:
             ozet["soruldu"] += len(grup)

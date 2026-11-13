@@ -523,7 +523,52 @@ def is_ekle(is_turu, kid, arg=None, **durum):
     kuyruk.put((is_turu, kid, arg, _nesil.get(kid, 0)))
 
 
+def koken_bekleyenler():
+    """0.5.79: köken adımı günlük sınıra takılmış kitaplar (kunye.koken.durum == gunluk_sinir)."""
+    out = []
+    for kid in sorted(os.listdir(KITAPLAR)) if os.path.isdir(KITAPLAR) else []:
+        try:
+            with open(kitap_yolu(kid), encoding="utf-8") as f:
+                kit = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if ((kit.get("kunye") or {}).get("koken") or {}).get("durum") == "gunluk_sinir":
+            out.append(kid)
+    return out
+
+
+def koken_takipcisi():
+    """0.5.79: köken modellerinin kotası açılınca (Pasifik gece yarısı, Amsterdam ~09:00) sınıra takılmış kitapları kendiliğinden
+    Osmanlıca adımına yeniden verir (küçük kitap önce; sorular kök başına, cevaplar kalıcı). Günde bir kez; kota yine dolarsa ertesi gün
+    kalanlar. Kullanıcının elle yeniden başlatması gerekmez. STUDYO_KOKEN_TAKIP=0 kapatır."""
+    if os.environ.get("STUDYO_KOKEN_TAKIP", "1") == "0":
+        return
+    from . import koken
+    son = None
+    while True:
+        time.sleep(1800)
+        try:
+            gun = yz._pasifik_gunu()
+            if gun == son or not yz.acik():
+                continue
+            tukenen = set(yz._sayac()["tukenen"])
+            if all(m in tukenen for m in koken.MODELLER):
+                continue
+            kids = koken_bekleyenler()
+            son = gun
+            for kid in kids:
+                with _kilit:
+                    if kid in _silinecek or kid in _calisan.values():
+                        continue
+                is_ekle("osmanlica", kid, tur="epub")
+            if kids:
+                print(f"köken: kota açıldı, {len(kids)} kitap Osmanlıca adımına yeniden verildi", flush=True)
+        except Exception:
+            traceback.print_exc()
+
+
 def baslat():
+    threading.Thread(target=koken_takipcisi, daemon=True, name="koken-takip").start()
     threading.Thread(target=isci, daemon=True, name="kutuphane-hafif").start()
     threading.Thread(target=isci, args=(True,), daemon=True, name="kutuphane-agir").start()
     threading.Thread(target=isci, args=("osm",), daemon=True, name="kutuphane-osmanlica").start()

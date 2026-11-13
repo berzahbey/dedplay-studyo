@@ -183,6 +183,24 @@ def modeller(anahtar=None):
     return liste
 
 
+_tum_onbellek = {"zaman": 0, "liste": []}
+
+
+def tum_modeller():
+    """0.5.74: hesabın gördüğü bütün Gemini modelleri (köken adımı kendi modelini seçer; günde bir kez sorulur)."""
+    if _tum_onbellek["liste"] and time.time() - _tum_onbellek["zaman"] < 86400:
+        return _tum_onbellek["liste"]
+    r = _istek("models?pageSize=200", zaman=30)
+    if r.status_code != 200:
+        raise RuntimeError(f"Gemini model listesi alınamadı ({r.status_code}): {r.text[:200]}")
+    liste = [m.get("name", "").split("/")[-1] for m in r.json().get("models", [])
+             if "generateContent" in (m.get("supportedGenerationMethods") or [])]
+    yok = set(ayarlar().get("kullanilamaz") or [])
+    liste = [a for a in liste if a not in yok]
+    _tum_onbellek.update(zaman=time.time(), liste=liste)
+    return liste
+
+
 def _bekleme(r):
     """429 cevabından: (günlük mü, beklenecek saniye)."""
     try:
@@ -213,6 +231,7 @@ class Gemini:
         self._ad = None
         self.zaman = 240          # 0.5.72: tek isteğin zaman aşımı (köken adımı daha kısa tutar)
         self.deneme = 10
+        self.liste = None         # 0.5.74: verilirse yalnız bu modeller, bu sırayla (köken adımı: Flash-Lite güvenilmez)
         self.json_kipi = True     # 0.5.73: köken adımında kapalı (JSON kipinde gemini-3.5-flash-lite 503 veriyordu, düz metinde 200)
 
     @property
@@ -225,6 +244,12 @@ class Gemini:
 
     def _sec(self):
         tukenen = set(_sayac()["tukenen"])
+        if self.liste is not None:
+            var = set(tum_modeller())
+            for m in self.liste:
+                if m in var and m not in tukenen:
+                    return m
+            raise GunlukSinir("Köken modellerinin (" + ", ".join(self.liste) + ") günlük sınırı doldu ya da hesapta yok")
         for m in modeller():
             if m not in tukenen:
                 return m
@@ -291,6 +316,7 @@ class Gemini:
                 # 0.5.56: model listede görünüyor ama hesaba kapalı (Tahrif 3, 31 Ekim: gemini-2.5-flash-lite "no longer available
                 # to new users"): kalıcı olarak atlanır, sıradaki modele geçilir (yoksa GunlukSinir: denetim ertesi gün sürer)
                 kullanilamaz_ekle(model)
+                _tum_onbellek.update(zaman=0, liste=[])
                 self._ad = None
                 self.ilerleme(f"{model} kullanılamıyor (Google kapatmış); sıradaki modele geçiliyor")
                 continue

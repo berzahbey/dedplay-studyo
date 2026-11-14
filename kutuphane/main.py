@@ -16,7 +16,7 @@ from . import kitap as K
 KAYNAK = os.environ.get("KAYNAK_DIR", "/kaynak")
 UZANTILAR = (".pdf", ".epub", ".docx", ".txt")
 
-SURUM = "0.5.80"
+SURUM = "0.5.81"
 STATIK = os.path.join(os.path.dirname(__file__), "static")
 HOST = "http://host.docker.internal"
 SERVISLER = {
@@ -318,9 +318,11 @@ def yeniden(kid: str):
 @app.post("/api/kitaplar/{kid}/kaynaktan")
 def kaynaktan_yeniden(kid: str):
     """0.5.26: kitabı kaynağından baştan işler (temizlik, Osmanlıca, EPUB'lar; Stüdyo işi yenilenir).
-    Okuma ekranındaki metin düzeltmeleri korunmaz (önceki kitap.json yedeklenir); elle düzeltilen ad/yazar korunur."""
-    _kitap(kid)
-    d = depo.durum_oku(kid)
+    Okuma ekranındaki metin düzeltmeleri korunmaz (önceki kitap.json yedeklenir); elle düzeltilen ad/yazar korunur.
+    0.5.81: ilk işlemesi hata veren kitapta kitap.json yoktur; kitap kaydı (durum.json) yeterli."""
+    d = depo.durum_oku(kid) if depo.KIMLIK.match(kid) else None
+    if not d:
+        raise HTTPException(404, "Böyle bir kitap yok")
     yol = d.get("kaynak_kimlik")
     if not yol:
         raise HTTPException(400, "Kitabın kaynağı kayıtlı değil")

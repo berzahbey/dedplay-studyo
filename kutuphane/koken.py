@@ -12,6 +12,7 @@ import threading
 import requests
 
 from . import yz
+from . import nvidia
 
 log = logging.getLogger("koken")
 from .osmanlica import URL
@@ -91,7 +92,7 @@ def kokenleri_sor(metinler, ilerleme=None):
     (o kelimeler sonraki çeviride yeniden sorulur); her grup günlüğe yazılır."""
     ilerleme = ilerleme or (lambda m: None)
     ozet = {"bilinmeyen": 0, "soruldu": 0, "onayli": 0, "kontrol": 0, "durum": "atlandi"}
-    if not yz.acik():
+    if not yz.acik() and not nvidia.acik():
         return ozet
     kelimeler = _bilinmeyenler("\n".join(m for m in metinler if m))
     if kelimeler is None:
@@ -103,14 +104,32 @@ def kokenleri_sor(metinler, ilerleme=None):
         return ozet
     gruplar = [kelimeler[i:i + GRUP] for i in range(0, len(kelimeler), GRUP)]
     kilit, dur = threading.Lock(), threading.Event()
+    nv_dolu = set()
 
     def sor(grup):
         if dur.is_set():
             return
+        kullanici = "KÖKEN GÖREVİ\n" + "\n".join(f"{n}. {w}" for n, w in enumerate(grup, 1))
+        cevap = model = None
+        for nm in (nvidia.modeller() if nvidia.acik() else []):     # 0.5.82: önce NVIDIA (sırayla), olmazsa Gemini
+            if nm in nv_dolu:
+                continue
+            n = nvidia.Nvidia(nm)
+            try:
+                cevap, model = n.sor(SISTEM, kullanici, en_fazla=6000)
+                g = n
+                break
+            except nvidia.SinirDoldu as e:
+                with kilit:
+                    nv_dolu.add(nm)
+                log.warning("köken: %s", e)
+            except Exception as e:      # noqa: BLE001
+                log.warning("köken: NVIDIA %s cevapsız (%s)", nm, type(e).__name__)
+        if cevap is not None:
+            return _isle(grup, cevap, model, g)
         g = yz.Gemini(lambda m: None)
         g.zaman, g.deneme, g.json_kipi = 240, 5, False   # 0.5.73: düz metin (JSON kipi 503); cevaptaki dizi json_al ile okunur
         g.liste = MODELLER                                # 0.5.74: Flash-Lite kullanılmaz
-        kullanici = "KÖKEN GÖREVİ\n" + "\n".join(f"{n}. {w}" for n, w in enumerate(grup, 1))
         try:
             cevap, model = g.sor(SISTEM, kullanici, en_fazla=6000)
         except yz.GunlukSinir:
@@ -123,6 +142,9 @@ def kokenleri_sor(metinler, ilerleme=None):
         except Exception as e:      # noqa: BLE001  geçici hata: bu grup sonraki çeviride yeniden sorulur
             log.warning("köken: grup cevapsız (%s)", type(e).__name__)
             return
+        return _isle(grup, cevap, model, g)
+
+    def _isle(grup, cevap, model, g):
         kayitlar = cevaplari_coz(grup, cevap, model)
         if len(kayitlar) < len(grup) * 0.9:     # 0.5.76: eksik/boş cevabın nedeni günlüğe (MAX_TOKENS, SAFETY, ...)
             log.warning("köken: eksik cevap (%d/%d, bitiş %s, %d karakter, sonu: %r)", len(kayitlar), len(grup),

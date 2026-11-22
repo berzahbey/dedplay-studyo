@@ -24,7 +24,11 @@ def n(s):
 def sor(saglayici, model, kelimeler):
     kullanici = "KÖKEN GÖREVİ\n" + "\n".join(f"{i}. {w}" for i, w in enumerate(kelimeler, 1))
     if saglayici == "nvidia":
-        return nvidia.Nvidia(model).sor(koken.SISTEM, kullanici, en_fazla=6000)
+        n = nvidia.Nvidia(model)
+        cevap, ad = n.sor(koken.SISTEM, kullanici, en_fazla=6000)
+        if not koken.cevaplari_coz(kelimeler, cevap, ad):
+            print(f"  (cevapsız parti: bitiş {n.son_bitis or '?'}, {len(cevap or '')} karakter, başı: {(cevap or '')[:120]!r})")
+        return cevap, ad
     g = yz.Gemini(lambda m: None)
     g.zaman, g.deneme, g.json_kipi, g.liste = 240, 5, False, [model]
     return g.sor(koken.SISTEM, kullanici, en_fazla=6000)

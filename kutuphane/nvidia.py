@@ -39,8 +39,11 @@ class Nvidia:
 
     def sor(self, sistem, kullanici, en_fazla=6000):
         """(cevap metni, "nvidia/<model>")"""
-        govde = {"model": self.model, "temperature": 0, "max_tokens": max(2048, en_fazla * 2),
+        govde = {"model": self.model, "temperature": 0, "max_tokens": max(4096, en_fazla * 3),
                  "messages": [{"role": "system", "content": sistem}, {"role": "user", "content": kullanici}]}
+        dus = os.environ.get("STUDYO_NVIDIA_DUSUNME", "").strip()      # 0.5.83: düşünen modellerde "low" / "none"
+        if dus:
+            govde["reasoning_effort"] = dus
         bas = {"Authorization": "Bearer " + anahtar(), "Content-Type": "application/json", "Accept": "application/json"}
         for deneme in range(self.deneme):
             try:
@@ -52,8 +55,15 @@ class Nvidia:
                 d = r.json()
                 ch = (d.get("choices") or [{}])[0]
                 self.son_bitis = str(ch.get("finish_reason") or "")
-                metin = (ch.get("message") or {}).get("content") or ""
-                return _DUSUNCE.sub("", metin).strip(), "nvidia/" + self.model
+                msj = ch.get("message") or {}
+                metin = _DUSUNCE.sub("", msj.get("content") or "").strip()
+                if "[" not in metin:          # 0.5.83: düşünen model cevabı düşünme alanında bırakmış olabilir
+                    dusunce = msj.get("reasoning_content") or msj.get("reasoning") or ""
+                    i = dusunce.rfind("[{")
+                    if i >= 0:
+                        metin = dusunce[i:]
+                self.son_uzunluk = len(metin)
+                return metin, "nvidia/" + self.model
             if r.status_code == 402:
                 raise SinirDoldu(f"{self.model}: kredi bitti (402)")
             if r.status_code == 429:

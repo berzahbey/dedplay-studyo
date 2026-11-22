@@ -1,6 +1,7 @@
 """0.5.82 (22 Kasım 2026): NVIDIA API (build.nvidia.com) köken sağlayıcısı.
 OpenAI uyumlu uç: https://integrate.api.nvidia.com/v1/chat/completions, anahtar NVIDIA_API_KEY (nvapi-...).
-Köken adımı STUDYO_KOKEN_NVIDIA'daki modelleri (virgülle, sırayla) önce dener; hepsi başarısızsa Gemini'ye düşer.
+Köken adımı STUDYO_KOKEN_NVIDIA'daki modelleri (virgülle, sırayla) önce dener; hepsi başarısızsa grup sonraki çeviride yeniden sorulur
+(0.5.84; STUDYO_KOKEN_GEMINI=1 ise Gemini'ye düşer).
 Model adı kayda "nvidia/<model>" diye yazılır (çevirici yz_kayit.guvenilir: adında "lite" yoksa güvenilir sayılır)."""
 import os
 import re

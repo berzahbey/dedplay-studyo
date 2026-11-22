@@ -25,6 +25,11 @@ ES_ZAMANLI = 3
 # Köken adımı yalnız bunları kullanır; ikisi de yoksa / sınırı dolduysa adım atlanır (Lite'a düşülmez).
 MODELLER = [m.strip() for m in os.environ.get("STUDYO_KOKEN_MODELLERI", "gemini-4-hydrogen,gemini-3.5-flash").split(",") if m.strip()]
 
+def gemini_yedek() -> bool:
+    """0.5.84: NVIDIA cevap vermezse Gemini'ye düşülsün mü (STUDYO_KOKEN_GEMINI=1). Varsayılan: hayır (NVIDIA açıkken)."""
+    return os.environ.get("STUDYO_KOKEN_GEMINI", "0") == "1"
+
+
 SISTEM = """Sen Türkçe metinlerdeki kelimelerin kökenini belirleyen bir dil uzmanısın. Sana Türkçe bir kitaptan kelimeler verilecek;
 kelimelere Türkçe ekler gelmiş olabilir. Her kelime için kökünün dilini ve gerekli bilgiyi ver. Yalnız JSON dizisi döndür:
 [{"no": 1, "koken": "...", "kok": "...", "yazilis": "...", "okunus": "...", "anlam": "..."}, ...]
@@ -127,6 +132,14 @@ def kokenleri_sor(metinler, ilerleme=None):
                 log.warning("köken: NVIDIA %s cevapsız (%s)", nm, type(e).__name__)
         if cevap is not None:
             return _isle(grup, cevap, model, g)
+        if nvidia.acik() and not gemini_yedek():
+            # 0.5.84 (Zahir): NVIDIA açıkken köken için Gemini kullanılmaz (Gemini kotası denetime kalır). Grup sonraki çeviride sorulur.
+            with kilit:
+                if len(nv_dolu) >= len(nvidia.modeller()) and not dur.is_set():
+                    log.warning("köken: NVIDIA sınırı doldu; %d/%d soruldu, kalanlar sonraki çeviride", ozet["soruldu"], len(kelimeler))
+                    ozet["durum"] = "gunluk_sinir"
+                    dur.set()
+            return
         g = yz.Gemini(lambda m: None)
         g.zaman, g.deneme, g.json_kipi = 240, 5, False   # 0.5.73: düz metin (JSON kipi 503); cevaptaki dizi json_al ile okunur
         g.liste = MODELLER                                # 0.5.74: Flash-Lite kullanılmaz

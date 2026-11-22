@@ -49,6 +49,10 @@ services:
       OUTPUT_DIR: /dedplay/.seslendirme   # Kitap Okuma'nın çalışma klasörü (aynı klasör, Stüdyo içinden)
       STUDYO_URL: http://host.docker.internal:8070
       OTOMATIK_CEVIRI: "0"
+      # 0.5.84: köken adımı (Osmanlıcadan önce bilinmeyen kelimeler) NVIDIA ile. Anahtar build.nvidia.com'dan; GitHub'a konmaz.
+      # Anahtar boşsa köken adımı Gemini ile çalışır (Stüdyo ayarındaki Gemini anahtarı).
+      NVIDIA_API_KEY: ""
+      STUDYO_KOKEN_NVIDIA: nvidia/nemotron-3-ultra-550b-a55b
     volumes:
       - type: bind
         source: /DATA/AppData/dedplay-studyo/studyo

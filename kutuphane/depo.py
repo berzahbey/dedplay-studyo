@@ -218,6 +218,12 @@ def _dosya_ekle(kid, yol):
     if not os.path.exists(yol):
         raise FileNotFoundError("Kaynak dosya bulunamadı: " + yol)
     kit = kaynak.cevir(yol, lambda m: durum_asama(kid, m), {"yol": yol}, kapak_yolu=os.path.join(klasor(kid), "kapak"))
+    try:  # 0.5.88: sayfa başına yapışmış sütun başlığı ve sayfa numarası silinir, bölünen paragraflar birleşir
+        from . import sayfa_basi
+        if kit.get("kunye", {}).get("asil_dil") == "tr":
+            sayfa_basi.temizle(kit, klasor(kid))
+    except Exception:
+        traceback.print_exc()
     try:  # 0.5.86: OCR onarımı ilk iş (denetimden ve Osmanlıcadan önce); hata kitabı durdurmaz
         from . import ocr_onarim
         durum_asama(kid, "OCR hataları onarılıyor")

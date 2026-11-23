@@ -254,18 +254,124 @@ def _artiklar(t, S):
     return _BIR_SON.sub("", y)
 
 
+# ---- 0.5.89 (Zahir, 23 Kasım: "âyet numaraları, kaynak adları cümlelerin arasına giriyor"; İslam Felsefesinde Allah'ın Varlığının
+# Delilleri dinlemesi). Seslendirmeye yalnız kitabın ana konusu gider. ----
+_ATIF_BASI = r"(?:Bak|Bk|Bkz|bak|bk|bkz|Krş|krş|Karş|karş|Bakınız|bakınız)\."
+_DIPNOT_PARAGRAF = re.compile(rf"^\s*(?:\d{{1,3}}|[IılL]{{1,2}})\s*[.)\-–—]?\s*{_ATIF_BASI}\s")          # "64 Bak. al - A'râf, ayet: 185."
+_AYET_ATIF = re.compile(r"\b[âa]yet(?:ler)?\s*:\s*\d", re.I)                                                  # "Bakara, ayet: 21 - 22"
+_SATIR_BASI_ATIF = re.compile(rf"^\s*(?:\d{{1,3}}|[IılL]{{1,2}})\s+{_ATIF_BASI}\s[^.!?]*[.!?]\s*")           # "Il Bak. İbn Rüşd, Kitab al-Keşf …."
+_OLUM_TARIH = re.compile(r"\s?\((?:Ölm|Öl|ölm|öl|Ö|ö|Vef|vef|Doğ|doğ|[vVdD])\.?\s*(?:H\.|M\.|Hicri|Hicrî|Milâdi|Miladi|\d|[ıoOlg]\d)[^()]{0,80}\)"
+                         r"|\s?\((?:H|M|Hicri|Hicrî|Milâdi|Miladi)\.?\s*[\dıoOlg]{1,4}\b[^()]{0,40}\)(?!.{0,30}?(?:yıl|sene|tarih))")   # "(Ölm. H. 231 / M. 845)"
+_SON_NO = re.compile(r"(?<![\d.])([^\W\d_]{2,}[\"”'’]?)\s+(\d{1,3})(?=\s*(?:[.,;:]\s*(?=$|[\"“A-ZÇĞİÖŞÜÂÎÛ])|$))")
+_SAYI_BAGLAMI = {"sayfa", "madde", "maddesi", "bölüm", "bölümü", "cilt", "ayet", "âyet", "sure", "no", "numara", "tane", "adet", "yaş",
+                 "yaşında", "yıl", "yılı", "gün", "kişi", "asır", "yüzyıl", "sayı", "sayısı", "kat", "derece", "yüzde", "fasıl", "bab"}
+
+
+def _son_no(m, S):
+    w = m.group(1).rstrip("\"”'’")
+    if w[:1].isupper() and m.end() < len(m.string) and m.string[m.end():].strip():
+        return m.group(0)                # "Hz. Ali 1. Halife": büyük harfli adın ardındaki sıra sayısı (yalnız satır sonunda not no)
+    k = w.replace("I", "ı").replace("İ", "i").lower()
+    if k in _SAYI_BAGLAMI or k in ("ve", "ile", "veya", "ya", "yahut", "ila", "ilâ", "ilk", "son") or k.startswith(("yıl", "yaş", "sayfa", "madde", "bölüm", "cilt", "ayet", "âyet", "sure", "numara", "asır",
+                                           "yüzyıl", "derece", "sayı", "fasl", "bab", "kısım", "nüsha", "baskı")):
+        return m.group(0)
+    return m.group(1) + S
+
+
+_KAYNAK_ISARET = [re.compile(x) for x in (
+    r"\bs\.\s*\d", r"\b[cC]\.\s*(?:[IVX]+\b|\d)", r"\b(?:Bak|Bk|Bkz)\.|\bbakınız\s*:", r"\bvd\.", r"\b(?:a\.\s?g\.\s?e|age)\b",
+    r"\b(?:Matbaa\w*|baskısı|Yayınları|Yay\.|Press|Verlag|Paris|Beyrut|Beyrouth|Kahire|Leiden|London|Wiesbaden|Tahrân)\b",
+    r"\b(?:1[5-9]|20)\d\d\b", r"\b(?:al|an|at|as|ar|ad|az)\s*-\s*[A-ZÇĞİÖŞÜÂ]", r"\(tarihsiz\)|\bts\.|\bnşr\.|\bçev\.")]
+_CUMLE_SINIRI = re.compile(r"(?<=[.!?;])\s+(?=[A-ZÇĞİÖŞÜÂÎÛ\d\"“])")
+
+
+def kaynak_cumleleri(t):
+    """0.5.89: paragrafın içine karışmış kaynak cümlelerini çıkarır ("31 Kindi için bakınız: …, s. 80 - 84, Matbaat as-Sa'âde"):
+    en az iki kaynak işareti (s. 12, c. II, Bak., matbaa/şehir, yıl, al-…) taşıyan cümle okunmaz."""
+    if sum(1 for r in _KAYNAK_ISARET if r.search(t)) < 2:
+        return t
+    parcalar, bas = [], 0
+    for m in _CUMLE_SINIRI.finditer(t):
+        onceki = re.search(r"(\S+?)[.!?;]+[\"”'’)]*$", t[bas:m.start()])
+        w = onceki.group(1) if onceki else ""
+        if (len(w) >= 3 and not re.fullmatch(r"(?:Bak|Bkz|bak|bkz|vd|age|Krş|krş|nşr|çev|Yay|bsk|haz)", w)) or re.fullmatch(r"\d{4}", w):
+            parcalar.append(t[bas:m.start()])
+            bas = m.end()
+    parcalar.append(t[bas:])
+    def kaynak(c):
+        if sum(1 for r in _KAYNAK_ISARET if r.search(c)) < 2:
+            return False
+        son = re.findall(r"[^\W\d_]+", c)
+        # yüklemle biten cümle ana metindir ("… s. 172 rivayetinde geçen bu söz, … anlatır."); kaynak satırı sayı/şehir/eserle biter
+        return not (son and re.search(r"(?:[ıiuü]r|[ae]r|[dt][ıiuü]r|m[ıiuü]ş|[dt][ıiuü]|[dt][ıiuü]k|yor|m[ae]l[ıi]|[ae]c[ae]k|d[ıi]rl[ae]r)$",
+                                       son[-1].lower()) and not re.search(r"\d\W*$", c.strip()))
+    kalan = [c for c in parcalar if not kaynak(c)]
+    return " ".join(kalan) if len(kalan) != len(parcalar) else t
+
+
+def icindekiler_satiri(t):
+    """İçindekiler / dizin / yanlış-doğru cetveli satırı (sesle okunmaz): "29 Karşıtlar ve eşler", "45 BİBLİYOGRAFYA", "Sonuç 43",
+    "İnayet: 25, 26.", "Mehdî Maddi 19 34 sırf sırk 20 17". Cümle (ünsüzle biten noktalı söz) ve numaralı madde ("2- Soldan sağa…") değil."""
+    k = t.split()
+    if not k:
+        return False
+    sayi = [w for w in k if re.fullmatch(r"[\(\[]?\d{1,4}(?:\s*[-–]\s*\d{1,4})?[)\].,;:…]*", w)]
+    if len(k) <= 12 and re.fullmatch(r"[^.!?\d]{2,50}:\s*\d{1,3}(?:\s*,\s*\d{1,3})*\.?", t.strip()):
+        return True
+    if len(sayi) < 4 or len(sayi) < 0.25 * len(k) or len(k) > 60 or re.search(r"[a-zçğıöşü]{3,}[.!?]\s+[A-ZÇĞİÖŞÜ]", t):
+        return False
+    # yanlış-doğru cetveli ("sırf sırk 20 17 önce öne 24 21": yan yana sayı çiftleri) ya da dizin ("Mısır: 6, 10, 14")
+    return len(re.findall(r"(?<![\d,])\d{1,3}\s+\d{1,3}(?![\d,.])", t)) >= 2 or bool(re.search(r"\d{1,4}\s*,\s*\d{1,4}\s*,\s*\d{1,4}", t))
+
+
+def icindekiler_benzeri(t):
+    """Tek başına karar verilemeyen içindekiler satırı biçimi ("29 Karşıtlar ve eşler", "Sonuç 43"): art arda en az 3 tane gelirse
+    içindekiler sayılır (worker.ses_satirlari). "Bu da Tanrıdır 12" gibi tek satır cümle olabilir."""
+    k = t.split()
+    return 1 <= len(k) <= 9 and bool(re.fullmatch(
+        r"\s*(?:\d{1,3}(?:\s*[-–]\s*\d{1,3})?\.?\s+[^\d.!?]{2,70}|[^\d.!?]{2,70}?\s+\d{1,3}(?:\s*[-–]\s*\d{1,3})?)\s*", t)) \
+        and not re.match(r"\s*\d{1,3}\s*[-–—)]", t) \
+        and not re.search(r"(?:[dt][ıiuü]r|m[ıiuü]ş|[dt][ıiuü]|[ıiuüae]r|[ıiuü]yor)\s+\d{1,3}\s*$", t)   # yüklem + not no: cümle
+
+
 def ses_metni(t):
-    """Seslendirmeye giden bir satırdan kaynak gösterimlerini çıkarır. Kaynak gösterimi olmayan satır olduğu gibi kalır."""
+    """Seslendirmeye giden bir satırdan kaynak gösterimlerini çıkarır. Kaynak gösterimi olmayan satır olduğu gibi kalır.
+    0.5.89: parantezler çıktıktan sonra paragrafa karışmış kaynak cümleleri de çıkar."""
+    y = _ses_metni1(t)
+    if not y:
+        return y
+    z = kaynak_cumleleri(y)
+    return z.strip() if z != y else y
+
+
+def _ses_metni1(t):
     if not t:
         return t
     S = "\u0000"
+    _t = _OLUM_TARIH.sub("", t.replace("\ue020", "").replace("\ue021", ""))
+    if _DIPNOT_PARAGRAF.match(_t) and len(_t.split()) <= 60 and \
+            not re.search(r"[a-zçğıöşü]{3,}[.!?]\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü']+\s+[a-zçğıöşü]", _t):
+        return ""                        # 0.5.89: ana metne karışmış dipnot paragrafı
+    if _AYET_ATIF.search(_t) and len(_t.split()) <= 25 and re.match(r"\s*\d", _t):
+        return ""                        # 0.5.89: "83 al - En'âm, ayet: 76."
+    if icindekiler_satiri(_t):
+        return ""                        # 0.5.89: içindekiler, dizin, yanlış-doğru cetveli satırı
+    if _SATIR_BASI_ATIF.match(t) or _OLUM_TARIH.search(t) or _SON_NO.search(t):
+        t2 = _SATIR_BASI_ATIF.sub("", t)
+        t2 = _OLUM_TARIH.sub(S, t2)
+        t2 = _SON_NO.sub(lambda m: _son_no(m, S), t2)
+        if t2 != t:
+            t2 = re.sub(r"\s*\u0000[\s\u0000]*(?=[.,;:!?»”’)]|$)", "", t2)
+            t = re.sub(r"\s*\u0000[\s\u0000]*", " ", t2).strip()
+            if not t:
+                return ""
     if harekesiz_arap_satiri(t.replace("\ue020", "").replace("\ue021", "")):
         return ""                        # 0.5.54
     if dizin_satiri(t.replace("\ue020", "").replace("\ue021", "")):
         return ""                        # 0.5.61
     if "\ue020" in t or "\ue021" in t:   # 0.5.52: Hazırlık'ın okunmaz işaretli parçası (kaynak, dipnot no, kaynak satırı) okunmaz
         t = re.sub("\ue020[^\ue021]*\ue021", S, t).replace("\ue020", "").replace("\ue021", "")
-        y = ses_metni(t.replace(S, " \ue022 "))
+        y = _ses_metni1(t.replace(S, " \ue022 "))
         y = re.sub(r"\s*\ue022[\s\ue022]*(?=[.,;:!?»”’)]|$)", "", y)
         return re.sub(r"\s*\ue022[\s\ue022]*", " ", y).strip()
     # çıkan yerin işareti: yalnız orada boşluk/noktalama toplanır (öteki satırlar değişmez, sesi yeniden üretilmez)

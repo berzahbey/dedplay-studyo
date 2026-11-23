@@ -95,7 +95,27 @@ def birlestir(satirlar):
 
 def ses_satirlari(tr, title="", tekrar=None):
     """Bir parçanın seslendirmeye giden satırları (parts_to_epub ile aynı; ölçüm betikleri de bunu kullanır)."""
-    satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for x in (tr or "").split("\n")]  # ayet/madde no okunmaz
+    from .ses import icindekiler_benzeri
+    ham = (tr or "").split("\n")
+    ben = [icindekiler_benzeri(x) for x in ham]                                  # 0.5.89: art arda 3+ içindekiler satırı okunmaz
+    sil = set()
+    i = 0
+    while i < len(ham):
+        j = i
+        while j < len(ham) and ben[j]:
+            j += 1
+        if j - i >= 3:
+            sil.update(range(i, j))
+        i = max(j, i + 1)
+    for n, x in enumerate(ham):                                                 # 0.5.89: yanlış-doğru cetveli başlığından sonrası
+        if re.search(r"\b(?:Yanlış|YANLIŞ)\b", x) and re.search(r"\b(?:Doğru|DOĞRU)\b", x) and len(x.split()) <= 8:
+            sil.add(n)
+            for m2 in range(n + 1, len(ham)):
+                if re.search(r"\d", ham[m2]) and len(ham[m2].split()) <= 10 and not re.search(r"[a-zçğıöşü]{3,}[.!?]$", ham[m2].strip()):
+                    sil.add(m2)
+                else:
+                    break
+    satirlar = [re.sub(r"^\s*\d{1,3}\s*[.)]\s*", "", x) for n, x in enumerate(ham) if n not in sil]  # ayet/madde no okunmaz
     parca = _baslik_parcalari(title)
     tekrar = tekrar or {}
     satirlar = [x for x in satirlar if not ust_bilgi_mi(x, parca, tekrar)]      # 0.5.63

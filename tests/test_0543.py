@@ -36,8 +36,10 @@ dene("not işaretleri (3) [1] (٢) (Haşiye-1) (*)", "dedi (3) ve [1] ile (٢) s
 dene("yapışık not numarası", "ifade edilmiştir:124 Lâ ilâhe", "ifade edilmiştir: Lâ ilâhe")
 dene("açıklama + atıf: yalnız atıf çıkar", "esirliğin (İslamın kabul ettiği esirlik anlamı içerisinde; bak., s. 127) evlilik",
      "esirliğin (İslamın kabul ettiği esirlik anlamı içerisinde) evlilik")
+# 0.5.89 (Zahir: cümle içine giren bilgi okunmaz): ölüm tarihi parantezi çıkar
+dene("ölüm tarihi (0.5.89)", "Taberî (ölm. 310/923) ve Nazzam (Ölm. H. 231 / M. 845) söyledi", "Taberî ve Nazzam söyledi")
 # kalanlar (kaynak gösterimi değil)
-for ad, t in (("yıl (1953)", "O (1953) yılında"), ("tarih", "(19 Kasım 1908) günü"), ("ölüm tarihi", "Taberî (ölm. 310/923) ve (Öl. 950)"),
+for ad, t in (("yıl (1953)", "O (1953) yılında"), ("tarih", "(19 Kasım 1908) günü"), 
               ("hicrî/milâdî yıl", "(H. 505) ve (M. 1058) yılında"), ("açıklama", "(yani bir yıl) sonra"), ("sayı değeri", "(400.000) kişi"),
               ("uzun açıklama", "kimsedir (yukarıda s. 182'de sözü edilen durum bunun dışında kalır). Nefis"),
               ("anlatıda ad + yıl", "Ahmed, 1950 yılında İstanbul'a gitti."), ("anlatıda sûre adına benzeyen kelime", "Rum, 1453 yılında fethedildi."),

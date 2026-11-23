@@ -356,7 +356,9 @@ def _denetim(kid, arg=None):
         sy = (b.get("ses_yok") or {}).get("tr")
         if sy and b["metin"].get("tr"):
             b["metin"]["tr"] = K.ses_yok_isaretle(b["metin"]["tr"], sy)
-    dn = D.Denetci(klasor(kid), ilerleme=ilerleme)
+    _nm = D.nvidia_modeli()   # 0.5.90: NVIDIA açıksa denetim de NVIDIA ile ("n:" kararları Gemini'ninkilerden ayrı saklanır)
+    dn = D.Denetci(klasor(kid), ilerleme=ilerleme, model=D.NvidiaDenetim(_nm), on_ek="n:") if _nm else \
+        D.Denetci(klasor(kid), ilerleme=ilerleme)
     try:
         dn.calistir(kit)
     except yz.GunlukSinir:
@@ -371,7 +373,7 @@ def _denetim(kid, arg=None):
         if sayi <= DENETIM_GECICI_DENEME:
             ne = time.time() + DENETIM_GECICI_BEKLE
             saat = time.strftime("%H:%M", time.localtime(ne))
-            durum_yaz(kid, asama=f"Yapay zekâ: Gemini şu an cevap vermiyor; {saat}'de yeniden denenecek ({sayi}/{DENETIM_GECICI_DENEME})",
+            durum_yaz(kid, asama=f"Yapay zekâ şu an cevap vermiyor; {saat}'de yeniden denenecek ({sayi}/{DENETIM_GECICI_DENEME})",
                       denetim={"durum": "bekliyor", "devam": int(ne), "gecici": sayi})
             threading.Timer(DENETIM_GECICI_BEKLE, lambda: is_ekle("denetim", kid, arg)).start()
             return None

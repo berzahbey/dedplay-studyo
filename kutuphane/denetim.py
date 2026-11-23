@@ -203,6 +203,37 @@ GEMINI_GRUP = {"parantez": 150, "sayi": 150, "satir": 100, "kelime": 400, "resim
 # Flash-Lite: günde 500 istek (28 Ekim): daha küçük gruplar (her maddeye daha çok dikkat), kitap başına ~50 istek
 GEMINI_LITE_GRUP = {"parantez": 50, "sayi": 60, "satir": 40, "kelime": 120, "resim": 25}
 
+# 0.5.90: NVIDIA ile denetim (Zahir, 23 Kasım: "şu an kullandığımız yapay zekâyı temizlik ve kelime düzeltme için de devreye sokalım").
+# Daha küçük gruplar: büyük model uzun cevapta yavaşlıyor ve cevabı yarıda kesebiliyor (köken adımında görüldü).
+NVIDIA_GRUP = {"parantez": 60, "sayi": 60, "satir": 40, "kelime": 100, "resim": 30}
+
+
+def nvidia_modeli():
+    """STUDYO_DENETIM_NVIDIA: denetimin NVIDIA modeli; verilmemişse köken modeli (STUDYO_KOKEN_NVIDIA'nın ilki); "0" kapatır (Gemini)."""
+    m = os.environ.get("STUDYO_DENETIM_NVIDIA", "").strip()
+    if m == "0":
+        return None
+    if not m:
+        m = (os.environ.get("STUDYO_KOKEN_NVIDIA", "").split(",")[0]).strip()
+    from . import nvidia
+    return m if m and nvidia.acik() else None
+
+
+class NvidiaDenetim:
+    """Denetci'nin model arayüzü (.sor, .ad) NVIDIA ile. Cevap yoksa yz.GeciciHata: kitap 30 dk sonra yeniden denetlenir."""
+
+    def __init__(self, model):
+        self.ad = "nvidia/" + model if not model.startswith("nvidia/") else model
+        self.model = model
+
+    def sor(self, sistem, kullanici, en_fazla=6000):
+        from . import nvidia, yz
+        try:
+            return nvidia.Nvidia(self.model).sor(sistem, kullanici, en_fazla=en_fazla)
+        except nvidia.SinirDoldu as e:
+            raise yz.GeciciHata(f"NVIDIA cevap vermiyor: {e}")
+
+
 class Denetci:
     """klasor: kitabın klasörü (denetim_kararlar.json burada). model: .sor(sistem, kullanici, en_fazla) -> metin ya da
     (metin, model adı) ve .ad veren nesne (Stüdyo: yz.Gemini; Hazırlık: yerel MLX ya da Gemini). on_ek: kararların ön eki
@@ -244,7 +275,7 @@ class Denetci:
             if f"{on}{gorev}:{a}" in self.kararlar:
                 cevap[a] = self.kararlar[f"{on}{gorev}:{a}"]
         if sorulacak and on:   # Gemini: Flash-Lite günde 500 istek: kitap başına ~50 isteğe sığan gruplar
-            tablo = GEMINI_LITE_GRUP if "lite" in getattr(self.model, "ad", "") else GEMINI_GRUP
+            tablo = NVIDIA_GRUP if on == "n:" else GEMINI_LITE_GRUP if "lite" in getattr(self.model, "ad", "") else GEMINI_GRUP
             grup = tablo.get(gorev, grup * 15)
         t0 = time.time()
         for k in range(0, len(sorulacak), grup):

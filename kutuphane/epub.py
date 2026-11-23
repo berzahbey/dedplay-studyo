@@ -1,4 +1,4 @@
-"""kitap.json -> EPUB 3 (fihrist, sayfa listesi, dipnot pencereleri, sağdan sola, iki dilli).
+"""kitap.json -> EPUB 3 (dipnotlar ve fihrist kitabın sonunda (0.5.91), sayfa listesi, dipnot pencereleri, sağdan sola, iki dilli).
 
 diller: gösterilecek diller sırasıyla, ör. ["tr"], ["osm"], ["tr", "osm"], ["ar", "tr"].
 İlk dil ana dildir: sayfa listesi, fihrist ve okuma yönü ondan alınır.
@@ -48,6 +48,13 @@ a.notref { font-size: 0.7em; vertical-align: super; line-height: 0; text-decorat
 aside.notlar-bolum { margin-top: 2em; border-top: 1px solid #999; padding-top: 0.5em; font-size: 0.85em; }
 aside.dipnot p { text-indent: 0; }
 aside.dipnot a.geri { text-decoration: none; }
+ol.notlar { list-style: none; padding: 0; margin: 0; }
+li.dipnot { margin: 0 0 0.6em 0; font-size: 0.9em; }
+li.dipnot p { text-indent: 0; margin: 0; }
+li.dipnot a.geri { text-decoration: none; }
+ol.fihrist { list-style: none; padding: 0; margin: 0; }
+ol.fihrist li { text-indent: 0; margin: 0.2em 0; }
+ol.fihrist li.f2 { margin-inline-start: 1.2em; } ol.fihrist li.f3 { margin-inline-start: 2.4em; } ol.fihrist li.f4 { margin-inline-start: 3.6em; }
 .kunye { text-align: center; margin-top: 3em; }
 .kunye p { text-indent: 0; text-align: center; margin: 0.4em 0; }
 .kunye .eser { font-size: 1.6em; font-weight: bold; margin: 0.8em 0; }
@@ -85,6 +92,9 @@ def konum_tahmin(kaynak, konum, hedef):
     return min(bosluk, key=lambda c: abs(c - k)) if bosluk else 0
 
 
+NOT_DOSYASI = "dipnotlar.xhtml"
+
+
 class _Uretici:
     def __init__(self, kit, diller, baslik=None):
         self.k, self.diller, self.ana = kit, diller, diller[0]
@@ -92,6 +102,8 @@ class _Uretici:
         self.arap_harfli = any(_dil(d)[1] == "rtl" for d in diller)
         self.baslik = baslik or self._kunye_baslik(self.ana)
         self.not_no = {}   # n0003 -> 1, 2, 3 (görünüş sırasıyla)
+        self.tum_notlar = {}  # 0.5.91: n0003 -> (bölüm dosyası, atıf id) — dipnotlar kitabın sonunda tek sayfada
+        self._dosya = ""
         self.sayfa_listesi = []  # (etiket, href)
         self.fihrist = []  # (seviye, etiket, href)
         # elindeki kitaplar: "Bölüm 001 (5-20) Başlık"; kitabın kendi fihristi varsa o olduğu gibi kullanılır
@@ -143,9 +155,9 @@ class _Uretici:
                 self.not_no[n] = len(self.not_no) + 1
             no = self.not_no[n]
             rid = f"r-{d}-{n}"
-            self.bolum_notlari.setdefault(n, rid)
+            self.tum_notlar.setdefault(n, (self._dosya, rid))   # 0.5.91: ilk atıf (geri bağlantı buraya)
             return (f'<a class="notref" epub:type="noteref" role="doc-noteref" id="{rid}" '
-                    f'href="#{n}">{no}</a>')
+                    f'href="{NOT_DOSYASI}#{n}">{no}</a>')
         return K.NOT_ISARETI.sub(_not, X(parca, quote=False))
 
     # ---------- bölümler ----------
@@ -242,7 +254,7 @@ class _Uretici:
         return etiket
 
     def bolum_xhtml(self, bloklar, dosya):
-        self.bolum_notlari = {}
+        self._dosya = dosya
         govde, onceki_seviye, ilk_baslik = [], 0, None
         bolum_basligi = None
         if self.numarali:
@@ -290,19 +302,39 @@ class _Uretici:
                     govde.append(f'<div class="cift" id="{b["id"]}">' + "".join(ps) + "</div>")
                 elif ps:
                     govde.append(ps[0])
-        if self.bolum_notlari:
-            notlar = []
-            for n, rid in self.bolum_notlari.items():
-                icerik = []
-                for d in self.diller:
-                    t = self.k["dipnotlar"][n]["metin"].get(d)
-                    if t:
-                        icerik.append(f"<p{_attr(d)}>{X(t, quote=False)}</p>")
-                no = self.not_no[n]
-                notlar.append(f'<aside class="dipnot" epub:type="footnote" role="doc-footnote" id="{n}">'
-                              f'<p><a class="geri" href="#{rid}">{no}.</a></p>{"".join(icerik)}</aside>')
-            govde.append('<section class="notlar-bolum" epub:type="footnotes">' + "".join(notlar) + "</section>")
         return self._sayfa(ilk_baslik or self.baslik, "\n".join(govde), govde_sinif=self.ana)
+
+    # ---------- son sayfalar (0.5.91: dipnotlar ve fihrist kitabın sonunda) ----------
+    def dipnotlar_xhtml(self):
+        """Bütün dipnotlar numara sırasıyla tek sayfada; metindeki numaraya tıklayınca not açılır (epub:type footnote),
+        notun numarası metindeki yerine geri götürür."""
+        notlar = []
+        for n, (dosya, rid) in sorted(self.tum_notlar.items(), key=lambda x: self.not_no[x[0]]):
+            icerik = []
+            for d in self.diller:
+                t = self.k.get("dipnotlar", {}).get(n, {}).get("metin", {}).get(d)
+                if t:
+                    icerik.append(f"<p{_attr(d)}>{X(t, quote=False)}</p>")
+            no = self.not_no[n]
+            # aside değil: bazı okuyucular (Apple Books) aside dipnotlarını sayfada gizler; sonnot sayfada görünür,
+            # numaraya tıklayınca yine pencerede açılır
+            notlar.append(f'<li class="dipnot" epub:type="endnote" id="{n}">'
+                          f'<p><a class="geri" href="{dosya}#{rid}">{no}.</a></p>{"".join(icerik)}</li>')
+        ad = self._dipnot_adi()
+        return self._sayfa(ad, f'<section class="notlar" epub:type="endnotes" role="doc-endnotes"><h1>{XM(ad)}</h1>'
+                               f'<ol class="notlar">{"".join(notlar)}</ol></section>', govde_sinif=self.ana)
+
+    def fihrist_xhtml(self):
+        """Görünür fihrist (içindekiler) kitabın sonunda: bölüm ve başlıklar, tıklanınca yerine gider."""
+        satir = []
+        for sv, etiket, href in self.fihrist:
+            satir.append(f'<li class="f{min(sv, 4)}"><a href="{href}">{XM(etiket)}</a></li>')
+        ad = self._fihrist_adi()
+        return self._sayfa(ad, f'<section class="fihrist" epub:type="backmatter"><h1>{XM(ad)}</h1>'
+                               f'<ol class="fihrist">{"".join(satir)}</ol></section>', govde_sinif=self.ana)
+
+    def _dipnot_adi(self):
+        return {"ar": "الحواشي", "osm": "حاشیه‌لر"}.get(self.ana, "Dipnotlar")
 
     def _sayfa(self, baslik, govde, govde_sinif="", ek_bas=""):
         return (f'<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n'
@@ -396,6 +428,11 @@ def uret(kit, diller, cikti_yolu=None, baslik=None, kapak_png=None):
     for i, grup in enumerate(bolumler, 1):
         ad = f"bolum_{i:03d}.xhtml"
         icerik.append((f"OEBPS/metin/{ad}", u.bolum_xhtml(grup, ad), f"b{i:03d}"))
+    # 0.5.91: kitabın sonunda önce dipnotlar, sonra fihrist
+    if u.tum_notlar:
+        icerik.append((f"OEBPS/metin/{NOT_DOSYASI}", u.dipnotlar_xhtml(), "dipnotlar"))
+    if len(u.fihrist) > 1:
+        icerik.append(("OEBPS/metin/fihrist.xhtml", u.fihrist_xhtml(), "fihrist"))
     ku = kit["kunye"]
     yazar = ku.get("yazar", {})
     if kapak_png is None:

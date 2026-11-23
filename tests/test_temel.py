@@ -61,13 +61,16 @@ for diller in (["ar"], ["tr"], ["osm"], ["tr", "osm"], ["ar", "tr"]):
     if epubcheck.var_mi():
         d = epubcheck.denetle(yol)
         ok(d["hata"] == 0 and d["uyari"] == 0, f"{diller}: epubcheck 0 hata 0 uyarı {d['mesajlar'][:2]}")
-h = zipfile.ZipFile(os.path.join(gecici, "tr_osm.epub")).read("OEBPS/metin/bolum_001.xhtml").decode()
-ok(h.count('epub:type="noteref"') == 2 and h.count('epub:type="footnote"') == 1, "iki dilli dipnot: 2 atıf, 1 not")
+zt = zipfile.ZipFile(os.path.join(gecici, "tr_osm.epub"))
+h = zt.read("OEBPS/metin/bolum_001.xhtml").decode()
+dn = zt.read("OEBPS/metin/dipnotlar.xhtml").decode()
+ok(h.count('epub:type="noteref"') == 2 and 'href="dipnotlar.xhtml#n0001"' in h and h.count('epub:type="endnote"') == 0
+   and dn.count('epub:type="endnote"') == 1 and 'href="bolum_001.xhtml#r-' in dn, "iki dilli dipnot: 2 atıf, not kitabın sonunda (0.5.91)")
 opf = zipfile.ZipFile(os.path.join(gecici, "osm.epub")).read("OEBPS/content.opf").decode()
 ok('page-progression-direction="rtl"' in opf, "Osmanlıca sağdan sola")
 spine = opf.split("<spine")[1].split("</spine>")[0]
-ok('idref="nav"' not in spine and spine.index('"kapak"') < spine.index('"b001"'),
-   "okuma sırası: kapak, künye, metin (0.5.8: fihrist sayfası yok)")
+ok('idref="nav"' not in spine and spine.index('"kapak"') < spine.index('"b001"') < spine.index('"dipnotlar"') < spine.index('"fihrist"'),
+   "okuma sırası: kapak, künye, metin, dipnotlar, fihrist (0.5.91)")
 
 # düzeltme
 ok(K.duzelt(t, "b00002", "tr", "Düzeltilmiş metin {{n0001}}.") and t["bloklar"][1]["elle"]["tr"], "düzeltme kaydı ve 'elle' işareti")

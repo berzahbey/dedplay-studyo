@@ -25,6 +25,14 @@ ES_ZAMANLI = 3
 # Köken adımı yalnız bunları kullanır; ikisi de yoksa / sınırı dolduysa adım atlanır (Lite'a düşülmez).
 MODELLER = [m.strip() for m in os.environ.get("STUDYO_KOKEN_MODELLERI", "gemini-4-hydrogen,gemini-3.5-flash").split(",") if m.strip()]
 
+def sure() -> int:
+    """0.5.85: köken adımının Osmanlıcayı en çok bekletebileceği süre (saniye)."""
+    try:
+        return max(30, int(os.environ.get("STUDYO_KOKEN_SURE", "600")))
+    except ValueError:
+        return 600
+
+
 def gemini_yedek() -> bool:
     """0.5.84: NVIDIA cevap vermezse Gemini'ye düşülsün mü (STUDYO_KOKEN_GEMINI=1). Varsayılan: hayır (NVIDIA açıkken)."""
     return os.environ.get("STUDYO_KOKEN_GEMINI", "0") == "1"
@@ -169,13 +177,26 @@ def kokenleri_sor(metinler, ilerleme=None):
             ozet["kontrol"] += s.get("kontrol", 0)
             log.warning("köken: %d/%d soruldu (grup %d kelime, %d cevap, model %s)", ozet["soruldu"], len(kelimeler),
                         len(grup), len(kayitlar), model)
-            ilerleme(f"Kelime kökenleri soruluyor: {ozet['soruldu']}/{len(kelimeler)}")
+            if not ozet.get("arka_plan"):     # 0.5.85: süre dolduktan sonra biten grup kitabın durumunu değiştirmez
+                ilerleme(f"Kelime kökenleri soruluyor: {ozet['soruldu']}/{len(kelimeler)}")
 
     ilerleme(f"Kelime kökenleri soruluyor: 0/{len(kelimeler)}")
-    with concurrent.futures.ThreadPoolExecutor(ES_ZAMANLI) as ex:
-        list(ex.map(sor, gruplar))
-    if ozet["durum"] != "gunluk_sinir":
-        ozet["durum"] = "tamam"
-    else:
+    # 0.5.85 (Zahir: "dakikalardır 1 kitap işleniyor"): köken adımı Osmanlıcayı en çok STUDYO_KOKEN_SURE saniye bekletir (varsayılan 600).
+    # Süre dolunca yeni grup başlamaz, Osmanlıca hemen sürer; yoldaki gruplar arka planda bitip kaydedilir. Kalan kelimeler
+    # koken_takipcisi'nin yeniden verdiği turda sorulur (kitap kuyruğu boşalınca).
+    ex = concurrent.futures.ThreadPoolExecutor(ES_ZAMANLI)
+    isler = [ex.submit(sor, gr) for gr in gruplar]
+    _, kalan = concurrent.futures.wait(isler, timeout=sure())
+    if kalan:
+        dur.set()
+        with kilit:
+            ozet["arka_plan"] = True
+            if ozet["durum"] != "gunluk_sinir":
+                ozet["durum"] = "sure_doldu"
+                log.warning("köken: süre doldu (%d sn); %d/%d soruldu, kalanlar sonraki turda", sure(), ozet["soruldu"], len(kelimeler))
+    ex.shutdown(wait=False, cancel_futures=True)
+    if ozet["durum"] == "gunluk_sinir":
         ilerleme("Yapay zekâ günlük sınırı doldu; kalan kelimeler sonraki çeviride sorulacak")
-    return ozet
+    elif ozet["durum"] != "sure_doldu":
+        ozet["durum"] = "tamam"
+    return dict(ozet)

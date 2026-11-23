@@ -49,7 +49,8 @@ class Nvidia:
         for deneme in range(self.deneme):
             try:
                 r = requests.post(URL + "/chat/completions", headers=bas, json=govde, timeout=self.zaman)
-            except requests.RequestException:
+            except requests.RequestException as e:
+                print(f"NVIDIA {self.model}: istek cevapsız ({type(e).__name__}), deneme {deneme + 1}/{self.deneme}", flush=True)
                 time.sleep(15 * (deneme + 1))
                 continue
             if r.status_code == 200:
@@ -64,13 +65,15 @@ class Nvidia:
                     if i >= 0:
                         metin = dusunce[i:]
                 self.son_uzunluk = len(metin)
-                return metin, "nvidia/" + self.model
+                return metin, (self.model if self.model.startswith("nvidia/") else "nvidia/" + self.model)
             if r.status_code == 402:
                 raise SinirDoldu(f"{self.model}: kredi bitti (402)")
             if r.status_code == 429:
+                print(f"NVIDIA {self.model}: 429 (dakika sınırı), deneme {deneme + 1}/{self.deneme}", flush=True)
                 time.sleep(min(30 * (deneme + 1), 120))
                 continue
             if r.status_code in (500, 502, 503, 504):
+                print(f"NVIDIA {self.model}: {r.status_code}, deneme {deneme + 1}/{self.deneme}", flush=True)
                 time.sleep(10 * (deneme + 1))
                 continue
             raise RuntimeError(f"NVIDIA hatası {r.status_code}: {r.text[:300]}")

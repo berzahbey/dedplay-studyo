@@ -524,7 +524,7 @@ def is_ekle(is_turu, kid, arg=None, **durum):
 
 
 def koken_bekleyenler():
-    """0.5.79: köken adımı günlük sınıra takılmış kitaplar (kunye.koken.durum == gunluk_sinir)."""
+    """0.5.79: köken adımı günlük sınıra takılmış kitaplar (kunye.koken.durum == gunluk_sinir; 0.5.85: ya da sure_doldu)."""
     out = []
     for kid in sorted(os.listdir(KITAPLAR)) if os.path.isdir(KITAPLAR) else []:
         try:
@@ -532,7 +532,7 @@ def koken_bekleyenler():
                 kit = json.load(f)
         except (OSError, ValueError):
             continue
-        if ((kit.get("kunye") or {}).get("koken") or {}).get("durum") == "gunluk_sinir":
+        if ((kit.get("kunye") or {}).get("koken") or {}).get("durum") in ("gunluk_sinir", "sure_doldu"):
             out.append(kid)
     return out
 
@@ -543,11 +543,24 @@ def koken_takipcisi():
     kalanlar. Kullanıcının elle yeniden başlatması gerekmez. STUDYO_KOKEN_TAKIP=0 kapatır."""
     if os.environ.get("STUDYO_KOKEN_TAKIP", "1") == "0":
         return
-    from . import koken
+    from . import koken, nvidia
     son = None
     while True:
         time.sleep(1800)
         try:
+            if nvidia.acik():
+                # 0.5.85: NVIDIA'da günlük kota yok; köken sorusu yarım kalan (süre/sınır) kitaplar Osmanlıca kuyruğu boşken
+                # yeniden verilir (küçük kitap önce). Her turda yeni kelimeler sorulur; hepsi sorulunca kitap listeden düşer.
+                if _kuyruk_osm.empty() and "osm" not in _calisan:
+                    kids = koken_bekleyenler()
+                    for kid in kids:
+                        with _kilit:
+                            if kid in _silinecek or kid in _calisan.values():
+                                continue
+                        is_ekle("osmanlica", kid, tur="epub")
+                    if kids:
+                        print(f"köken: {len(kids)} kitabın kalan kelimeleri için Osmanlıca adımına yeniden verildi", flush=True)
+                continue
             gun = yz._pasifik_gunu()
             if gun == son or not yz.acik():
                 continue

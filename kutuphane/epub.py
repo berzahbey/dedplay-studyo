@@ -19,8 +19,18 @@ DIL = {"ar": ("ar", "rtl", "Arapça"), "tr": ("tr", "ltr", "Türkçe"), "osm": (
        "en": ("en", "ltr", "İngilizce"), "fr": ("fr", "ltr", "Fransızca"), "fa": ("fa", "rtl", "Farsça")}
 FONT_ADAY = ["/usr/share/fonts/truetype/amiri",
              os.environ.get("FONT_DIR", "/usr/share/fonts/truetype/amiri")]
-X = html.escape
-XM = lambda t: html.escape(t, quote=False)  # metin içi: yalnız & < > (Aristo'da, &#x27; değil)
+# 0.5.92: kaynak metindeki XML'de yasak denetim karakterleri (PDF'ten gelen \x08, \x1c…) EPUB'u bozuyordu (epubcheck FATAL; bozuk
+# dosyadaki kimlikler de "Fragment identifier is not defined" veriyordu: Harfler Kitabı, İslam Felsefesi Tarihi-2). \x0b \x0c boşluk olur.
+_XML_BOSLUK = re.compile(r"[\x0b\x0c]")
+_XML_YASAK = re.compile(r"[\x00-\x08\x0e-\x1f\ufffe\uffff\ud800-\udfff]")
+
+
+def _temiz(t):
+    return _XML_YASAK.sub("", _XML_BOSLUK.sub(" ", t))
+
+
+X = lambda t, quote=True: html.escape(_temiz(t), quote=quote)
+XM = lambda t: html.escape(_temiz(t), quote=False)  # metin içi: yalnız & < > (Aristo'da, &#x27; değil)
 
 CSS = """@charset "utf-8";
 @font-face { font-family: "Amiri"; font-weight: normal; src: url(../fonts/Amiri-Regular.ttf); }

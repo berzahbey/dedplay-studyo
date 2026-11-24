@@ -89,6 +89,23 @@ def temizle(kit, klasor=None):
         return len(a) >= 4 and any(_benzer(on, x) >= 0.8 or (len(a) >= 6 and _icinde(a, x)) for x in aday if x)
 
     silinen = collections.Counter()
+    # 0.5.92 (İdeal Devlet: "26 oldukça ona daha çok yaklaşırız"): sayfa bir başlıkla başlıyorsa sayfa işareti başlıkta kalır, OCR'ın
+    # sayfa numarası satırı başlıktan sonraki paragrafın başına düşer. Başlığın sayfa numarasıyla başlayan sonraki paragraftan silinir.
+    for i, b in enumerate(bloklar[:-1]):
+        if b.get("tur") != "baslik" or not b.get("sayfalar"):
+            continue
+        nolar = {str(s.get("no")) for s in b["sayfalar"]}
+        n = bloklar[i + 1]
+        if n.get("tur") != "p" or (n.get("elle") or {}).get("tr"):
+            continue
+        t = n["metin"].get("tr", "")
+        m = re.match(r"\s*(\d{1,4})\s+(?=\S)", t)
+        if not m or m.group(1) not in nolar or (n.get("sayfalar") and n["sayfalar"][0].get("konum", {}).get("tr", 1) == 0):
+            continue
+        n["metin"]["tr"] = t[m.end():]
+        for s2 in n.get("sayfalar", []):
+            s2["konum"]["tr"] = max(0, s2.get("konum", {}).get("tr", 0) - m.end())
+        silinen[f"sayfa numarası {m.group(1)} (başlıktan sonra)"] += 1
     for b in bloklar:
         if b.get("tur") == "baslik" or not b.get("sayfalar") or (b.get("elle") or {}).get("tr"):
             continue

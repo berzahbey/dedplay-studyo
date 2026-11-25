@@ -106,6 +106,39 @@ def temizle(kit, klasor=None):
         for s2 in n.get("sayfalar", []):
             s2["konum"]["tr"] = max(0, s2.get("konum", {}).get("tr", 0) - m.end())
         silinen[f"sayfa numarası {m.group(1)} (başlıktan sonra)"] += 1
+    # 0.5.93 (kalite taraması: Fususul Hikem Anahtarları "262 - FUSUSU'L HİKEM ANAHTARLARI söylüyor: …", 184 yerde): "sayı - KİTAP ADI"
+    # sayfa başlığı metnin içine karışmış; sayfa işareti olmayan (EPUB'dan gelen) kitaplarda da aranır. Başlık kitap adına ya da bir
+    # bölüm başlığına benzemeli ve ardından küçük harfle (cümlenin devamı) gelmeli.
+    for b in bloklar:
+        if b.get("tur") != "p" or (b.get("elle") or {}).get("tr"):
+            continue
+        t = b["metin"].get("tr", "")
+        if not re.search(r"\d\s*[-–—]\s*[A-ZÇĞİÖŞÜ]", t):
+            continue
+        parcalar, son = [], 0
+        for m in re.finditer(r"(?:(?<=^)|(?<=\s))(\d{1,4})\s*[-–—]\s*(?=[A-ZÇĞİÖŞÜÂÎÛ])", t):
+            if m.start() < son:
+                continue
+            on, uz = _buyuk_onek(t[m.end():])
+            sonra = t[m.end() + uz:m.end() + uz + 2].lstrip()
+            if on and len(_anahtar(on)) >= 6 and baslik_mi(on.strip()) and (not sonra or sonra[0].islower() or sonra[0] in "“\"'‘«"):
+                bit = m.end() + uz
+                while bit < len(t) and t[bit] == " ":
+                    bit += 1
+                parcalar.append((m.start(), bit))
+                silinen[f"{m.group(1)} - {on.strip()}"[:60]] += 1
+                son = bit
+        if parcalar:
+            def yeni_konum(k):
+                return k - sum(min(k, bit) - bas for bas, bit in parcalar if k > bas)
+            yeni_t, onceki = [], 0
+            for bas, bit in parcalar:
+                yeni_t.append(t[onceki:bas])
+                onceki = bit
+            yeni_t.append(t[onceki:])
+            b["metin"]["tr"] = "".join(yeni_t)
+            for s2 in b.get("sayfalar", []):
+                s2["konum"]["tr"] = yeni_konum(s2.get("konum", {}).get("tr", 0))
     for b in bloklar:
         if b.get("tur") == "baslik" or not b.get("sayfalar") or (b.get("elle") or {}).get("tr"):
             continue

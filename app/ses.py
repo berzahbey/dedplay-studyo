@@ -29,6 +29,14 @@ _TARIH_BASI = re.compile(r"(?:ö|öl|ölm|ölümü|vefatı|vefat|v|d|doğ|doğum
 _ESER_NO = re.compile(r"[A-ZÇĞİÖŞÜÂÎÛ'’][^()\[\]\d]{1,60}?[,:]?\s*(?:[IVXLC]+\s*,\s*)?\d{1,4}(?:\s*[-–/]\s*\d{1,4})?(?:\s*vd\.?)?\.?")
 
 
+# 0.5.93 (kalite taraması 25 Kasım: DİA ve Lübb'de "(40/16)", "(en-Nebe’ 78/23)" okunuyordu): sure/âyet ya da bölüm/âyet numarası.
+# İki tarafı da en çok 3 haneli (hicrî/milâdî yıl "(508/1115)" kalır); önünde en çok üç kelimelik ad olabilir.
+_SURE_AYET = re.compile(r"(?:[^\W\d_][^\d,;()/]{0,30}?,?\s*)?\d{1,3}\s*/\s*\d{1,3}(?:\s*[-–]\s*\d{1,3})?"
+                        r"(?:\s*,\s*\d{1,3}(?:\s*/\s*\d{1,3})?(?:\s*[-–]\s*\d{1,3})?)*\.?")
+
+_KESIR = {("1", "2"), ("1", "3"), ("2", "3"), ("1", "4"), ("3", "4"), ("1", "6"), ("1", "8")}   # miras payı "(1/4)" okunur
+
+
 def atif_mi(ic):
     """Parantez/köşeli parantez içi bir kaynak gösterimi mi."""
     c = ic.strip()
@@ -38,10 +46,15 @@ def atif_mi(ic):
         return True                                             # not işareti
     if _HADIS_YALNIZ.fullmatch(c):
         return True                                             # (Müslim), (Buharî, Müslim)
+    if re.match(r"(?:(?:aş|yk|yuk|aş)\.\s*)?(?:bkz|bk)\.(?:\s|$)", c, re.I):
+        return True                                             # 0.5.93: "(bk. el-CÂMİU’s-SAHÎH)", "(bk. HAVÂLE)": sayısız çapraz atıf
     if not re.search(r"[\d٠-٩]", c):
         return False
     if _SURE_RX.search(c) or _SURE_NO.search(c):
         return True                                             # (Kehf, 110), (Nahil Sûresi, 97), (20/Taha: 50)
+    if _SURE_AYET.fullmatch(c) and all(int(a) <= 114 and int(b) <= 286 and (a, b) not in _KESIR
+                                       for a, b in re.findall(r"(\d+)\s*/\s*(\d+)", c)):
+        return True                                             # 0.5.93: (40/16), (en-Nebe’ 78/23), (Matta, 24/4-44); (508/1115) yıl kalır
     m = re.match(r"([A-ZÇĞİÖŞÜ]{1,3})\.\s*(\d+)", c)
     if m:                                                       # (M. 54) sayfa; (H. 505) hicrî, (M. 1058) milâdî yıl kalır
         return not (m.group(1) == "H" or (m.group(1) == "M" and len(m.group(2)) == 4))
@@ -237,11 +250,32 @@ _KOSELI_NO = re.compile(r"\s?\[[lIij1]?\d{1,3}[lIij1]?[\]jl]?(?![\w])")       # 
 _ALLAH = re.compile(r"([Ll][Ll])([âÂ][hH])")
 
 
+# 0.5.93 (Harfler Kitabı: Arapça sayfalar Türkçe OCR'la okunmuş): Türkçe metinde hiç geçmeyen yazı sistemlerinin harfleri (Kanada hece,
+# Runik, Moğol, Etiyopya, Tibet, Sinhala, Tay, Kiril eki, değiştirici harfler) ve denetim karakterleri. Latin Genişletilmiş harfler
+# (DİA çeviriyazısı: Ǿ, ś, ĥ) çöp sayılmaz.
+_COP_HARF = re.compile(r"[\u02B0-\u02FF\u0480-\u052F\u0D80-\u0DFF\u0E00-\u0E7F\u0F00-\u0FFF\u1200-\u137F"
+                       r"\u1400-\u167F\u16A0-\u16FF\u1800-\u18AF\x00-\x08\x0b\x0c\x0e-\x1f\x80-\x9f]")
+_IYI_KELIME = re.compile(r"[A-Za-z\u00C0-\u024F'’]{3,}[.,;:!?\"”)]*")   # DİA çeviriyazısı (ś, ġ, Ǿ, ĥ) da düzgün kelime
+
+
+def ocr_copu(t):
+    """OCR çöpü satırı: yabancı yazı sistemi harfi en az 2 ve kelimelerin yarısından azı düzgün Türkçe/Latin kelime."""
+    t = t.replace("\ue020", "").replace("\ue021", "")
+    if len(_COP_HARF.findall(t)) < 2:
+        return False
+    k = t.split()
+    return bool(k) and sum(1 for w in k if _IYI_KELIME.fullmatch(w)) < 0.5 * len(k)
+
+
 def dizin_satiri(t):
     """Dizin satırı: "Cebrâil (Rûhü'l-Emin'e de bkz.): 369, 1172, 1632…" — sesle okunmaz."""
     k = t.split()
     sayi = [w for w in k if re.fullmatch(r"\d{1,5}[,.;…]*", w)]
-    return len(sayi) >= 5 and len(sayi) >= 0.6 * len(k)
+    if len(sayi) >= 5 and len(sayi) >= 0.6 * len(k):
+        return True
+    # 0.5.93 (Affifi: tek paragrafa birleşmiş "İNDEKS abd Allah 75 abd el-Câmi 70 …", 2.756 karakter): uzun paragrafta sayıların payı
+    # yüksek ve cümle yok (büyük harfle başlayan yeni cümle en çok 2)
+    return len(k) >= 40 and len(sayi) >= 0.2 * len(k) and len(re.findall(r"[a-zçğıöşü]{3,}[.!?]\s+[A-ZÇĞİÖŞÜ]", t)) <= 2
 
 
 def _artiklar(t, S):
@@ -282,13 +316,14 @@ _KAYNAK_ISARET = [re.compile(x) for x in (
     r"\bs\.\s*\d", r"\b[cC]\.\s*(?:[IVX]+\b|\d)", r"\b(?:Bak|Bk|Bkz)\.|\bbakınız\s*:", r"\bvd\.", r"\b(?:a\.\s?g\.\s?e|age)\b",
     r"\b(?:Matbaa\w*|baskısı|Yayınları|Yay\.|Press|Verlag|Paris|Beyrut|Beyrouth|Kahire|Leiden|London|Wiesbaden|Tahrân)\b",
     r"\b(?:1[5-9]|20)\d\d\b", r"\b(?:al|an|at|as|ar|ad|az)\s*-\s*[A-ZÇĞİÖŞÜÂ]", r"\(tarihsiz\)|\bts\.|\bnşr\.|\bçev\.")]
+_BK = re.compile(r"(?<![\w.])(?:[Bb]k|[Bb]kz)\.\s+\S")   # parantez dışında "bk. X": cümle kaynak göstermek için
 _CUMLE_SINIRI = re.compile(r"(?<=[.!?;])\s+(?=[A-ZÇĞİÖŞÜÂÎÛ\d\"“])")
 
 
 def kaynak_cumleleri(t):
     """0.5.89: paragrafın içine karışmış kaynak cümlelerini çıkarır ("31 Kindi için bakınız: …, s. 80 - 84, Matbaat as-Sa'âde"):
     en az iki kaynak işareti (s. 12, c. II, Bak., matbaa/şehir, yıl, al-…) taşıyan cümle okunmaz."""
-    if sum(1 for r in _KAYNAK_ISARET if r.search(t)) < 2:
+    if sum(1 for r in _KAYNAK_ISARET if r.search(t)) < 2 and not _BK.search(re.sub(r"\([^()]*\)", "", t)):
         return t
     parcalar, bas = [], 0
     for m in _CUMLE_SINIRI.finditer(t):
@@ -299,6 +334,8 @@ def kaynak_cumleleri(t):
             bas = m.end()
     parcalar.append(t[bas:])
     def kaynak(c):
+        if _BK.search(re.sub(r"\([^()]*\)", "", c)):
+            return True       # 0.5.93: "İkbal’le ilgili … listesi için bk. Syed Abdul Vahid, A Bibliography of Iqbal …"
         if sum(1 for r in _KAYNAK_ISARET if r.search(c)) < 2:
             return False
         son = re.findall(r"[^\W\d_]+", c)
@@ -365,6 +402,8 @@ def _ses_metni1(t):
             t = re.sub(r"\s*\u0000[\s\u0000]*", " ", t2).strip()
             if not t:
                 return ""
+    if ocr_copu(t):
+        return ""                        # 0.5.93: Arapça sayfanın Latin OCR'ı ("• J ı./ J '-.r.:>" oJoo 0iᡨٿ ƺlk;J\")
     if harekesiz_arap_satiri(t.replace("\ue020", "").replace("\ue021", "")):
         return ""                        # 0.5.54
     if dizin_satiri(t.replace("\ue020", "").replace("\ue021", "")):

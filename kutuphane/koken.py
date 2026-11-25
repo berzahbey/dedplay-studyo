@@ -7,6 +7,7 @@ Yapay zekâ kapalıysa, günlük sınır dolduysa ya da çevirici eski sürümse
 import concurrent.futures
 import logging
 import os
+import re
 import threading
 
 import requests
@@ -57,6 +58,33 @@ Kurallar:
 - anlam: kısa Türkçe karşılık (en çok 5 kelime); özel adda "kişi adı" / "yer adı".
 - Listedeki bazı öğeler eksiz kök (sakin, surat, kırbaç) ya da özel addır (Halime, Huzistan); onlar için de aynı kurallar.
 - Her kelime için bir nesne ver; "no" verilen numara olsun."""
+
+
+_TR_HARF = set("çğıöşüâîûÇĞİÖŞÜÂÎÛ")
+_UNSUZ4 = re.compile(r"[bcçdfgğhjklmnprsştvyzqwx]{4}")
+_UNSUZ3_C = re.compile(r"[bcçdfgğhjklmnprsştvyzqwx]{3}")
+
+
+def ocr_bozuk(w: str):
+    """0.5.94 (25 Kasım 2026, çevirici Tur YZ5 ölçümü): OCR onarımının düzeltemediği bozuk kelime köken sorusuna gönderilmez
+    (yapay zekâ ona benzeyen bir kök uyduruyor: bulri -> bulur بلور, Kitclbü -> kitap, gclmişlerdir -> geç). Dönen: sebep ya da None.
+      buyuk  - kelime içinde küçük harften sonra büyük harf (tYstadı, siJah, MilPin; kesme ve tireden sonrası hariç)
+      rakam  - harflerin arasında rakam
+      unsuz  - Türkçe harfli kelimede 4 ünsüz yan yana (çdnkü, zümrcdcndirler, Kabblerlnden) ya da 'c'li 3 ünsüz (OCR e -> c:
+               gcrçek, şckil, çcvede); Almanca 'ch'li kelimeler (Türkische, Schmölders) hariç.
+    Köken kaydında 131 bin kelimeden ~2.900'ü bu süzgece takılıyor; örnekte hepsi bozuk ya da Almanca dışı yabancı."""
+    if re.search(r"[a-zçğıöşüâîû][A-ZÇĞİÖŞÜÂÎÛ]", w):
+        return "buyuk"
+    if re.search(r"[^\W\d_]\d|\d[^\W\d_]", w):
+        return "rakam"
+    for p in re.sub(r"['’‘\-]", " ", w).replace("I", "ı").replace("İ", "i").lower().split():
+        if not (set(p) & _TR_HARF) or "ch" in p:
+            continue
+        if _UNSUZ4.search(p):
+            return "unsuz"
+        if any("c" in m.group(0) for m in _UNSUZ3_C.finditer(p)):
+            return "unsuz"
+    return None
 
 
 def _bilinmeyenler(metin):
@@ -110,6 +138,11 @@ def kokenleri_sor(metinler, ilerleme=None):
     kelimeler = _bilinmeyenler("\n".join(m for m in metinler if m))
     if kelimeler is None:
         return ozet
+    bozuk = [w for w in kelimeler if ocr_bozuk(w)]
+    if bozuk:                                   # 0.5.94: OCR bozuğu sorulmaz (kök uydurulmasın)
+        kelimeler = [w for w in kelimeler if not ocr_bozuk(w)]
+        ozet["ocr_bozuk"] = len(bozuk)
+        log.warning("köken: %d OCR bozuğu kelime sorulmadı (örnek: %s)", len(bozuk), ", ".join(bozuk[:8]))
     ozet["bilinmeyen"] = len(kelimeler)
     log.warning("köken: %d soru (kök başına; özel adlar ve sık geçenler önce)", len(kelimeler))
     if not kelimeler:

@@ -17,6 +17,7 @@ from . import kitap as K
 
 DIL = {"ar": ("ar", "rtl", "Arapça"), "tr": ("tr", "ltr", "Türkçe"), "osm": ("ota", "rtl", "Osmanlıca"),
        "en": ("en", "ltr", "İngilizce"), "fr": ("fr", "ltr", "Fransızca"), "fa": ("fa", "rtl", "Farsça")}
+RIKA_ADAY = [os.environ.get("RIKA_FONT_DIR", "/usr/share/fonts/truetype/arefruqaa"), "/usr/share/fonts/truetype/arefruqaa"]
 FONT_ADAY = ["/usr/share/fonts/truetype/amiri",
              os.environ.get("FONT_DIR", "/usr/share/fonts/truetype/amiri")]
 # 0.5.92: kaynak metindeki XML'de yasak denetim karakterleri (PDF'ten gelen \x08, \x1c…) EPUB'u bozuyordu (epubcheck FATAL; bozuk
@@ -426,12 +427,20 @@ def bolum_yapisi(kit, dil):
     return yapi
 
 
-def uret(kit, diller, cikti_yolu=None, baslik=None, kapak_png=None):
-    """EPUB baytlarını döndürür (cikti_yolu verilirse oraya da yazar)."""
+RIKA_CSS = """@font-face { font-family: "Aref Ruqaa"; font-weight: normal; src: url(../fonts/ArefRuqaa-Regular.ttf); }
+@font-face { font-family: "Aref Ruqaa"; font-weight: bold; src: url(../fonts/ArefRuqaa-Bold.ttf); }
+[dir="rtl"], [lang="ota"] { font-family: "Aref Ruqaa", "Amiri", serif; line-height: 2.05; }
+"""
+
+
+def uret(kit, diller, cikti_yolu=None, baslik=None, kapak_png=None, hat=None):
+    """EPUB baytlarını döndürür (cikti_yolu verilirse oraya da yazar).
+    0.5.97: hat="rika" -> Osmanlıca rik'a hattıyla (Aref Ruqaa gömülü; yazı tipinde sağır kef yok: ڭ düz kef ك yazılır, rik'a el
+    yazısındaki gibi). Başlığa "(Rik'a)" eklenir, kimliği nesih sürümünden ayrıdır."""
     kit = K.gorunur(kit)  # silinen bloklar EPUB'a girmez
     u = _Uretici(kit, diller, baslik)
     kimlik = kit["kunye"].get("kaynak", {}).get("kimlik") or u.baslik
-    uid = "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, "dedplay-kutuphane/" + kimlik + "/" + "-".join(diller)))
+    uid = "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, "dedplay-kutuphane/" + kimlik + "/" + "-".join(diller) + ("/rika" if hat == "rika" else "")))
     dosyalar = []  # (arşivdeki yol, içerik, medya türü, manifest id, özellikler)
     bolumler = u.bolumler()
     icerik = []
@@ -453,8 +462,8 @@ def uret(kit, diller, cikti_yolu=None, baslik=None, kapak_png=None):
     u.kapak_ad = kapak_ad
     dosyalar.append((f"OEBPS/resim/{kapak_ad}", kapak_png, "image/jpeg" if kapak_ad.endswith("jpg") else "image/png",
                      "kapak-resmi", "cover-image"))
-    dosyalar.append(("OEBPS/css/kitap.css", CSS if u.arap_harfli else re.sub(r"@font-face[^}]*}\n", "", CSS),
-                     "text/css", "css", None))
+    dosyalar.append(("OEBPS/css/kitap.css", (CSS + (RIKA_CSS if hat == "rika" else "")) if u.arap_harfli
+                     else re.sub(r"@font-face[^}]*}\n", "", CSS), "text/css", "css", None))
     if u.arap_harfli:
         fdir = next((f for f in FONT_ADAY if os.path.exists(os.path.join(f, "Amiri-Regular.ttf"))), None)
         if not fdir:
@@ -462,15 +471,26 @@ def uret(kit, diller, cikti_yolu=None, baslik=None, kapak_png=None):
         for ad in ("Amiri-Regular.ttf", "Amiri-Bold.ttf"):
             dosyalar.append((f"OEBPS/fonts/{ad}", open(os.path.join(fdir, ad), "rb").read(), "font/ttf",
                              ad.split(".")[0].lower(), None))
+        if hat == "rika":
+            rdir = next((f for f in RIKA_ADAY if os.path.exists(os.path.join(f, "ArefRuqaa-Regular.ttf"))), None)
+            if not rdir:
+                raise FileNotFoundError("Aref Ruqaa (rik'a) yazı tipi bulunamadı")
+            for ad in ("ArefRuqaa-Regular.ttf", "ArefRuqaa-Bold.ttf"):
+                dosyalar.append((f"OEBPS/fonts/{ad}", open(os.path.join(rdir, ad), "rb").read(), "font/ttf",
+                                 ad.split(".")[0].lower(), None))
     dosyalar.append(("OEBPS/metin/kapak.xhtml", u.kapak_xhtml(), "application/xhtml+xml", "kapak", None))
     dosyalar.append(("OEBPS/metin/kunye.xhtml", u.kunye_xhtml(), "application/xhtml+xml", "kunye", None))
     dosyalar.append(("OEBPS/nav.xhtml", u.nav_xhtml(), "application/xhtml+xml", "nav", "nav"))
     for yol, xh, mid in icerik:
         dosyalar.append((yol, xh, "application/xhtml+xml", mid, None))
+    if hat == "rika":   # 0.5.97: Aref Ruqaa'da sağır kef yok -> düz kef (Türkçe metinde bu harf geçmez)
+        dosyalar = [(y, x.replace("\u06ad", "\u0643") if isinstance(x, str) and mt == "application/xhtml+xml" else x, mt, m, oz)
+                    for y, x, mt, m, oz in dosyalar]
 
     lang = _dil(u.ana)[0]
     simdi = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    meta = [f'<dc:identifier id="kimlik">{uid}</dc:identifier>', f"<dc:title>{XM(u.baslik)}</dc:title>"]
+    meta = [f'<dc:identifier id="kimlik">{uid}</dc:identifier>',
+            f"<dc:title>{XM(u.baslik + (' (Rik' + chr(39) + 'a)' if hat == 'rika' else ''))}</dc:title>"]
     for d in dict.fromkeys(diller):
         meta.append(f"<dc:language>{_dil(d)[0]}</dc:language>")
     y = yazar.get(u.ana) or yazar.get("tr") or yazar.get(ku.get("asil_dil", "ar")) or yazar.get("lat")

@@ -134,6 +134,10 @@ def surumler(kit):
         out.append(("osmanlica", ["osm"]))
     if "tr" in d and "osm" in d:
         out.append(("turkce-osmanlica", ["tr", "osm"]))
+    if "osm" in d:   # 0.5.97 (Zahir): Osmanlıcanın rik'a hattıyla ayrı sürümleri (nesih sürümleri aynen kalır)
+        out.append(("osmanlica-rika", ["osm"], "rika"))
+        if "tr" in d:
+            out.append(("turkce-osmanlica-rika", ["tr", "osm"], "rika"))
     if asil not in ("tr", "osm"):  # yabancı asıl (Arapça, İngilizce…): asıllı sürümler
         ad = DIL_AD.get(asil, asil)
         if asil in d and "tr" in d:
@@ -164,17 +168,18 @@ def epub_uret(kid):
     os.makedirs(gecici)
     ad = _dosya_adi(kid, kit)
     sonuc = []
-    for ekad, diller in surumler(kit):
+    for surum in surumler(kit):
+        ekad, diller, hat = (tuple(surum) + (None,))[:3]
         dosya = f"{ad}_{ekad}.epub"
         durum_yaz(kid, asama=f"EPUB üretiliyor: {ekad}")
         kapak = None  # kitabın kendi kapak görseli (PDF'in ilk sayfası / EPUB'un kapağı) varsa o
         if kit["kunye"].get("kapak") and os.path.exists(os.path.join(klasor(kid), kit["kunye"]["kapak"])):
             kapak = open(os.path.join(klasor(kid), kit["kunye"]["kapak"]), "rb").read()
-        EPUB.uret(kit, diller, os.path.join(gecici, dosya), kapak_png=kapak)
+        EPUB.uret(kit, diller, os.path.join(gecici, dosya), kapak_png=kapak, hat=hat)
         durum_yaz(kid, asama=f"Denetleniyor: {ekad}")
         dn = epubcheck.denetle(os.path.join(gecici, dosya))
         sonuc.append({"dosya": dosya, "diller": diller, "boyut": os.path.getsize(os.path.join(gecici, dosya)),
-                      "denetim": dn})
+                      "denetim": dn, **({"hat": hat} if hat else {})})
     shutil.rmtree(ek, ignore_errors=True)  # hepsi başarıyla üretildikten sonra eskiler kalkar
     os.replace(gecici, ek)
     try:  # dil klasörlerine (Türkçe/, Osmanlıca/, Türkçe-Osmanlıca/ ...)

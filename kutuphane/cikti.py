@@ -36,7 +36,7 @@ def epublari_sil(kit, yazilan):
     adaylar = list(yazilan or [])
     if kit:
         ad = dosya_adi(kit)
-        adaylar += [os.path.join(k, ad + ".epub") for k in sorted(set(KLASOR_ADI.values()))]
+        adaylar += [os.path.join(k + e, ad + ".epub") for k in sorted(set(KLASOR_ADI.values())) for e in ("", " (Rik'a)")]
     for rel in dict.fromkeys(adaylar):
         yol = os.path.join(CIKTI, rel)
         if os.path.isfile(yol) and os.path.realpath(yol).startswith(kok):
@@ -72,7 +72,7 @@ def ciktiya_yaz(kit, epublar, epub_klasoru, onceki=None):
         ad = f"{temel} ({n})"
     yeni = []
     for e in epublar:
-        klasor = KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"]))
+        klasor = KLASOR_ADI.get(tuple(e["diller"]), "-".join(e["diller"])) + (" (Rik'a)" if e.get("hat") == "rika" else "")
         hedef_klasor = os.path.join(CIKTI, klasor)
         os.makedirs(hedef_klasor, exist_ok=True)
         hedef = os.path.join(hedef_klasor, ad + ".epub")

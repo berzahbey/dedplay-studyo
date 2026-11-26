@@ -38,7 +38,7 @@ kit = kaynak.cevir(yaz("Arapça Kitap.txt", arapca))
 ok(kit["kunye"]["asil_dil"] == "ar" and all("tr" not in b["metin"] for b in kit["bloklar"])
    and any("ar" in b["metin"] for b in kit["bloklar"]), "Arapça metin: asil_dil ar, metin Arapça anahtarında")
 ok("ar" in kit["kunye"]["baslik"] and "tr" not in kit["kunye"]["baslik"], "Arapça kitabın adı da kendi dilinde")
-ok([e for e, _ in depo.surumler(kit)] == ["arapca"] if depo.surumler(kit) else False,
+ok([s[0] for s in depo.surumler(kit)] == ["arapca"] if depo.surumler(kit) else False,
    f"Arapça kitap yalnız Arapça EPUB {depo.surumler(kit)}")
 
 kit = kaynak.cevir(yaz("English Book.txt", ingilizce))

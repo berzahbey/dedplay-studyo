@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Oku · Dedplay Stüdyo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Amiri:wght@400;700&family=Aref+Ruqaa:wght@400;700&display=swap" rel="stylesheet">
 <style>
 [hidden] { display: none !important; }
 :root {
@@ -85,6 +85,8 @@ nav.sayfalar { display: flex; justify-content: space-between; gap: 10px; margin-
   main { padding: 18px 16px calc(80px + env(safe-area-inset-bottom, 0px)); }
   .blok.silindi::before { position: static; margin-right: .4em; }
 }
+:root.rika { --arab: "Aref Ruqaa", "Amiri", "Traditional Arabic", serif; }   /* 0.5.97: rik'a hattı */
+:root.rika textarea { font-family: "Amiri", "Traditional Arabic", serif !important; }
 </style>
 </head>
 <body>
@@ -96,6 +98,7 @@ nav.sayfalar { display: flex; justify-content: space-between; gap: 10px; margin-
     <span class="diller" id="diller" role="group" aria-label="Okuma dili"></span>
     <button class="ara" id="kucult" type="button" aria-label="Yazıyı küçült">A−</button>
     <button class="ara" id="buyut" type="button" aria-label="Yazıyı büyüt">A+</button>
+    <button class="ara" type="button" id="hatBtn" aria-pressed="false" aria-label="Osmanlıca hat: Nesih ya da Rik'a">Rik'a</button>
     <button class="ara" id="duzeltBtn" type="button" aria-pressed="false">Düzelt</button>
   </div>
 </header>
@@ -332,6 +335,37 @@ kitapBilgi();
   ["click", "touchend", "keydown", "scroll"].forEach(function (t) { document.addEventListener(t, uyanikTut, { passive: true }); });
   window.ekranUyanik = function () { return { wakeLock: !!kilit, video: !video.paused }; };   // tarayıcı konsolunda denetim
   uyanikTut();
+})();
+</script>
+<script>
+/* 0.5.97 (Zahir: "Osmanlıcada rik'a hattı seçeneği"): Osmanlıca metin Nesih (Amiri) ya da Rik'a (Aref Ruqaa) ile gösterilir; seçim
+   cihazda hatırlanır. Aref Ruqaa'da sağır kef (ڭ) yok: rik'a görünümünde düz kef (ك) gösterilir (rik'a el yazısında da çoğu zaman
+   böyle); metnin kendisi değişmez, nesihe dönünce ڭ geri gelir. Düzeltme kutusu (textarea) hep nesih kalır. */
+(function () {
+  var ANAHTAR = "osm-hat", btn = document.getElementById("hatBtn"), asil = new WeakMap(), rika = false;
+  try { rika = localStorage.getItem(ANAHTAR) === "rika"; } catch (e) {}
+  function cevir(kok) {
+    if (!kok) return;
+    var w = document.createTreeWalker(kok, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) {
+      var el = n.parentElement;
+      if (!el || el.closest("textarea") || !el.closest('[dir="rtl"]')) continue;
+      if (rika) {
+        if (n.nodeValue.indexOf("\u06AD") >= 0) { asil.set(n, n.nodeValue); n.nodeValue = n.nodeValue.replace(/\u06AD/g, "\u0643"); }
+      } else if (asil.has(n)) { n.nodeValue = asil.get(n); asil.delete(n); }
+    }
+  }
+  function uygula() {
+    document.documentElement.classList.toggle("rika", rika);
+    if (btn) { btn.setAttribute("aria-pressed", rika ? "true" : "false"); btn.title = rika ? "Osmanlıca: Rik'a (nesihe dönmek için bas)" : "Osmanlıca: Nesih (rik'aya geçmek için bas)"; }
+    cevir(document.body);
+  }
+  if (btn) btn.addEventListener("click", function () { rika = !rika; try { localStorage.setItem(ANAHTAR, rika ? "rika" : "nesih"); } catch (e) {} uygula(); });
+  new MutationObserver(function (ms) {
+    if (!rika) return;
+    ms.forEach(function (m) { m.addedNodes.forEach(function (x) { cevir(x.nodeType === 1 ? x : x.parentElement); }); });
+  }).observe(document.body, { childList: true, subtree: true });
+  uygula();
 })();
 </script>
 </body>

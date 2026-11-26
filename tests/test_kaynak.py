@@ -60,10 +60,12 @@ for b in kit["bloklar"]:
     b["metin"]["osm"] = "عثمانلیجه " + " ".join("{{" + g + "}}" for g in K.NOT_ISARETI.findall(b["metin"]["tr"]))
 for n in kit["dipnotlar"].values():
     n["metin"]["osm"] = "حاشیه"
-ok([e for e, _ in depo.surumler(kit)] == ["turkce", "osmanlica", "turkce-osmanlica"], "Türkçe asıllı kitap: üç sürüm")
-for ek, diller in depo.surumler(kit):
+ok([s[0] for s in depo.surumler(kit)] == ["turkce", "osmanlica", "turkce-osmanlica", "osmanlica-rika", "turkce-osmanlica-rika"],
+   "Türkçe asıllı kitap: üç sürüm + iki rik'a sürümü (0.5.97)")
+for surum in depo.surumler(kit):
+    ek, diller, hat = (tuple(surum) + (None,))[:3]
     yol = os.path.join(klasor, ek + ".epub")
-    epub.uret(kit, diller, yol)
+    epub.uret(kit, diller, yol, hat=hat)
     if epubcheck.var_mi():
         d = epubcheck.denetle(yol)
         ok(d["hata"] == 0 and d["uyari"] == 0, f"EPUB {ek}: epubcheck 0 hata 0 uyarı {d['mesajlar'][:2]}")

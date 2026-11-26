@@ -8,7 +8,9 @@ ADD https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/tur.train
 RUN cp /tmp/tur_best.traineddata "$(dirname "$(find /usr/share/tesseract-ocr -name tur.traineddata | head -1)")/tur.traineddata" && rm /tmp/tur_best.traineddata  # tessdata_best: daha isabetli Türkçe OCR
 ADD https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf /usr/share/fonts/truetype/amiri/Amiri-Regular.ttf
 ADD https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Bold.ttf /usr/share/fonts/truetype/amiri/Amiri-Bold.ttf
-RUN chmod 644 /usr/share/fonts/truetype/amiri/*.ttf && fc-cache -f
+ADD https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Regular.ttf /usr/share/fonts/truetype/arefruqaa/ArefRuqaa-Regular.ttf
+ADD https://raw.githubusercontent.com/google/fonts/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf /usr/share/fonts/truetype/arefruqaa/ArefRuqaa-Bold.ttf
+RUN chmod 644 /usr/share/fonts/truetype/amiri/*.ttf /usr/share/fonts/truetype/arefruqaa/*.ttf && fc-cache -f
 # epubcheck (W3C resmî EPUB denetimi)
 ADD https://github.com/w3c/epubcheck/releases/download/v5.4.0/epubcheck-5.4.0.zip /tmp/epubcheck.zip
 RUN python -c "import zipfile; zipfile.ZipFile('/tmp/epubcheck.zip').extractall('/opt')" && rm /tmp/epubcheck.zip \

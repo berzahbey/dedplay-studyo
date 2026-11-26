@@ -37,7 +37,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 3px solid
 main { max-width: 40em; margin: 0 auto; padding: 24px 20px 160px; font-size: var(--boy); }
 main h1, main h2, main h3, main h4 { font-family: var(--serif); line-height: 1.3; }
 main p { font-family: var(--serif); line-height: 1.7; margin: 0 0 .6em; text-align: justify; hyphens: auto; -webkit-hyphens: auto; }
-main[dir="rtl"] { font-family: var(--arab); }
+main[dir="rtl"] { font-family: var(--arab); font-size: calc(var(--boy) * 1.15); }   /* 0.5.96: Osmanlıca harfler aynı boyda Latinden küçük görünür */
 main[dir="rtl"] p, main[dir="rtl"] h1, main[dir="rtl"] h2, main[dir="rtl"] h3 { font-family: var(--arab); line-height: 2; text-align: right; }
 main table { border-collapse: collapse; } main td, main th { border: 1px solid var(--line); padding: 4px 8px; }
 .bilgi { color: var(--muted); text-align: center; padding: 40px 0; }
@@ -87,10 +87,12 @@ const SAG = new Set(["Osmanlıca", "Arapça"]);
 let kitap = null, epub = null, yapi = null, no = 0;
 
 async function api(y) { const r = await fetch(y); const v = await r.json().catch(() => ({})); if (!r.ok) throw new Error(v.detail || `Sunucu hatası (${r.status})`); return v; }
-function boyutKur(b) { b = Math.min(30, Math.max(14, b)); document.documentElement.style.setProperty("--boy", b + "px"); sakla("raf:boy", b); return b; }
+// 0.5.96: üst sınır 30 -> 64 px; 24 px'ten sonra adım 2, 36'dan sonra 4
+const adim = (b, yon) => (yon > 0 ? (b >= 36 ? 4 : b >= 24 ? 2 : 1) : (b > 36 ? 4 : b > 24 ? 2 : 1));
+function boyutKur(b) { b = Math.min(64, Math.max(14, b)); document.documentElement.style.setProperty("--boy", b + "px"); sakla("raf:boy", b); return b; }
 let boy = boyutKur(al("raf:boy", 19));
-$("#kucuk").onclick = () => boy = boyutKur(boy - 1);
-$("#buyuk").onclick = () => boy = boyutKur(boy + 1);
+$("#kucuk").onclick = () => boy = boyutKur(boy - adim(boy, -1));
+$("#buyuk").onclick = () => boy = boyutKur(boy + adim(boy, 1));
 
 async function epubAc(e) {
   epub = e; sakla("raf:dil:" + kitap.anahtar, e.dil);

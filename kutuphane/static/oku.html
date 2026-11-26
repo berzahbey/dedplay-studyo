@@ -142,8 +142,10 @@ function durumYaz(m, sure = 2500) {
 // ---- yazı boyutu
 let boy = Number(oku("oku-boy", 19));
 const boyUygula = () => { document.documentElement.style.setProperty("--boy", boy + "px"); sakla("oku-boy", boy); };
-$("#kucult").onclick = () => { boy = Math.max(14, boy - 1); boyUygula(); };
-$("#buyut").onclick = () => { boy = Math.min(30, boy + 1); boyUygula(); };
+// 0.5.96 (Zahir: "en büyük yazı Osmanlıcada yetmiyor"): üst sınır 30 -> 64 px; 24 px'ten sonra adım 2, 36'dan sonra 4
+const adim = (b, yon) => (yon > 0 ? (b >= 36 ? 4 : b >= 24 ? 2 : 1) : (b > 36 ? 4 : b > 24 ? 2 : 1));
+$("#kucult").onclick = () => { boy = Math.max(14, boy - adim(boy, -1)); boyUygula(); };
+$("#buyut").onclick = () => { boy = Math.min(64, boy + adim(boy, 1)); boyUygula(); };
 boyUygula();
 
 // ---- dil seçimi
